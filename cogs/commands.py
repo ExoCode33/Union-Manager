@@ -81,7 +81,7 @@ class UnionCommands(commands.Cog):
         conn = await get_connection()
         try:
             await conn.execute(
-                "INSERT INTO users (discord_id, ign) VALUES ($1, $2) ON CONFLICT (discord_id) DO UPDATE SET ign = $2",
+                "INSERT INTO users (user_id, ign) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET ign = $2",
                 user.id, ign
             )
         finally:
@@ -114,7 +114,7 @@ class UnionCommands(commands.Cog):
         
         conn = await get_connection()
         try:
-            user_data = await conn.fetchrow("SELECT ign FROM users WHERE discord_id = $1", user.id)
+            user_data = await conn.fetchrow("SELECT ign FROM users WHERE user_id = $1", user.id)
         finally:
             await conn.close()
 
@@ -130,8 +130,8 @@ class UnionCommands(commands.Cog):
         conn = await get_connection()
         try:
             await conn.execute(
-                "INSERT INTO unions (role_id, name) VALUES ($1, $2) ON CONFLICT (role_id) DO NOTHING",
-                str(role.id), role.name
+                "INSERT INTO union_roles (role_id) VALUES ($1) ON CONFLICT (role_id) DO NOTHING",
+                str(role.id)
             )
         finally:
             await conn.close()
@@ -144,7 +144,7 @@ class UnionCommands(commands.Cog):
     async def deregister_union_role(self, interaction: discord.Interaction, role: discord.Role):
         conn = await get_connection()
         try:
-            await conn.execute("DELETE FROM unions WHERE role_id = $1", str(role.id))
+            await conn.execute("DELETE FROM union_roles WHERE role_id = $1", str(role.id))
         finally:
             await conn.close()
         
@@ -157,7 +157,7 @@ class UnionCommands(commands.Cog):
         conn = await get_connection()
         try:
             await conn.execute(
-                "INSERT INTO leaders (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET role_id = $2",
+                "INSERT INTO union_leaders (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET role_id = $2",
                 str(user.id), str(role.id)
             )
         finally:
@@ -171,7 +171,7 @@ class UnionCommands(commands.Cog):
     async def dismiss_union_leader(self, interaction: discord.Interaction, user: discord.Member):
         conn = await get_connection()
         try:
-            await conn.execute("DELETE FROM leaders WHERE user_id = $1", str(user.id))
+            await conn.execute("DELETE FROM union_leaders WHERE user_id = $1", str(user.id))
         finally:
             await conn.close()
         
@@ -184,11 +184,11 @@ class UnionCommands(commands.Cog):
         leader_id = str(interaction.user.id)
         conn = await get_connection()
         try:
-            leader = await conn.fetchrow("SELECT role_id FROM leaders WHERE user_id = $1", leader_id)
+            leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1", leader_id)
             if not leader:
                 await interaction.response.send_message("❌ You are not a union leader.", ephemeral=True)
                 return
-            await conn.execute("UPDATE users SET role_id = $1 WHERE discord_id = $2", leader['role_id'], str(user.id))
+            await conn.execute("UPDATE users SET union_role_id = $1 WHERE user_id = $2", leader['role_id'], str(user.id))
         finally:
             await conn.close()
         
@@ -202,11 +202,11 @@ class UnionCommands(commands.Cog):
         leader_id = str(interaction.user.id)
         conn = await get_connection()
         try:
-            leader = await conn.fetchrow("SELECT role_id FROM leaders WHERE user_id = $1", leader_id)
+            leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1", leader_id)
             if not leader:
                 await interaction.response.send_message("❌ You are not a union leader.", ephemeral=True)
                 return
-            await conn.execute("UPDATE users SET role_id = NULL WHERE discord_id = $1", str(user.id))
+            await conn.execute("UPDATE users SET union_role_id = NULL WHERE user_id = $1", str(user.id))
         finally:
             await conn.close()
         
@@ -219,12 +219,12 @@ class UnionCommands(commands.Cog):
         guild = interaction.guild
         conn = await get_connection()
         try:
-            unions = await conn.fetch("SELECT role_id, name FROM unions")
-            members = await conn.fetch("SELECT role_id, COUNT(*) FROM users WHERE role_id IS NOT NULL GROUP BY role_id")
+            unions = await conn.fetch("SELECT role_id FROM union_roles")
+            members = await conn.fetch("SELECT union_role_id, COUNT(*) FROM users WHERE union_role_id IS NOT NULL GROUP BY union_role_id")
         finally:
             await conn.close()
 
-        count_map = {row['role_id']: row['count'] for row in members}
+        count_map = {row['union_role_id']: row['count'] for row in members}
         if not unions:
             await interaction.response.send_message("📭 No unions found.", ephemeral=True)
             return
