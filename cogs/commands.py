@@ -28,7 +28,7 @@ class UnionCommands(commands.Cog):
             user = await conn.fetchrow("SELECT ign FROM users WHERE discord_id = $1", user_id)
 
         if user:
-            await interaction.response.send_message(f"**Discord:** <@{discord_id}>
+await interaction.response.send_message(f"**Discord:** <@{discord_id}>")
 **IGN:** `{user['ign']}`", ephemeral=True)
         else:
             await interaction.response.send_message("⚠️ No IGN found for this user.", ephemeral=True)
