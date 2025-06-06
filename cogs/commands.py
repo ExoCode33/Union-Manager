@@ -7,6 +7,24 @@ class UnionCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
+    async def username_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        """Autocomplete for username parameters"""
+        if not current:
+            # Show first 25 members if nothing is typed
+            members = list(interaction.guild.members)[:25]
+        else:
+            # Filter members based on what's being typed
+            current_lower = current.lower()
+            members = [
+                member for member in interaction.guild.members
+                if (current_lower in member.name.lower() or 
+                    current_lower in member.display_name.lower())
+            ][:25]  # Limit to 25 results
+        
+        return [
+            app_commands.Choice(name=f"{member.display_name} ({member.name})", value=member.name)
+            for member in members
+        ]
     def find_user_by_name(self, guild: discord.Guild, username: str) -> discord.Member:
         """Find a user in the guild by their username or display name"""
         username_lower = username.lower()
@@ -39,6 +57,7 @@ class UnionCommands(commands.Cog):
     # /register_ign
     @app_commands.command(name="register_ign", description="Register a user's IGN")
     @app_commands.describe(username="The Discord username of the user", ign="The IGN to register")
+    @app_commands.autocomplete(username=username_autocomplete)
     async def register_ign(self, interaction: discord.Interaction, username: str, ign: str):
         # First try to find user by name
         user = self.find_user_by_name(interaction.guild, username)
@@ -58,7 +77,7 @@ class UnionCommands(commands.Cog):
         
         user_display = f"{user.display_name} ({user.name})"
         
-        async with await get_connection() as conn:
+        async with get_connection() as conn:
             await conn.execute(
                 "INSERT INTO users (discord_id, ign) VALUES ($1, $2) ON CONFLICT (discord_id) DO UPDATE SET ign = $2",
                 user.id, ign
@@ -68,6 +87,7 @@ class UnionCommands(commands.Cog):
     # /search_user
     @app_commands.command(name="search_user", description="Search for a user by Discord username")
     @app_commands.describe(username="The Discord username of the user to search")
+    @app_commands.autocomplete(username=username_autocomplete)
     async def search_user(self, interaction: discord.Interaction, username: str):
         # First try to find user by name
         user = self.find_user_by_name(interaction.guild, username)
@@ -87,7 +107,7 @@ class UnionCommands(commands.Cog):
         
         user_display = f"{user.display_name} ({user.name})"
         
-        async with await get_connection() as conn:
+        async with get_connection() as conn:
             user_data = await conn.fetchrow("SELECT ign FROM users WHERE discord_id = $1", user.id)
 
         if user_data:
@@ -99,7 +119,7 @@ class UnionCommands(commands.Cog):
     @app_commands.command(name="register_role_as_union", description="Register a Discord role as a union")
     @app_commands.describe(role="The Discord role to register as a union")
     async def register_union_role(self, interaction: discord.Interaction, role: discord.Role):
-        async with await get_connection() as conn:
+        async with get_connection() as conn:
             await conn.execute(
                 "INSERT INTO unions (role_id, name) VALUES ($1, $2) ON CONFLICT (role_id) DO NOTHING",
                 str(role.id), role.name
@@ -110,7 +130,7 @@ class UnionCommands(commands.Cog):
     @app_commands.command(name="deregister_role_as_union", description="Deregister a union role")
     @app_commands.describe(role="The union role to deregister")
     async def deregister_union_role(self, interaction: discord.Interaction, role: discord.Role):
-        async with await get_connection() as conn:
+        async with get_connection() as conn:
             await conn.execute("DELETE FROM unions WHERE role_id = $1", str(role.id))
         await interaction.response.send_message(f"🗑️ Deregistered union: `{role.name}`", ephemeral=True)
 
@@ -118,7 +138,7 @@ class UnionCommands(commands.Cog):
     @app_commands.command(name="appoint_union_leader", description="Appoint a union leader")
     @app_commands.describe(user="The user to appoint", role="The union role to assign")
     async def appoint_union_leader(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
-        async with await get_connection() as conn:
+        async with get_connection() as conn:
             await conn.execute(
                 "INSERT INTO leaders (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET role_id = $2",
                 str(user.id), str(role.id)
@@ -129,7 +149,7 @@ class UnionCommands(commands.Cog):
     @app_commands.command(name="dismiss_union_leader", description="Dismiss a union leader")
     @app_commands.describe(user="The leader to dismiss")
     async def dismiss_union_leader(self, interaction: discord.Interaction, user: discord.Member):
-        async with await get_connection() as conn:
+        async with get_connection() as conn:
             await conn.execute("DELETE FROM leaders WHERE user_id = $1", str(user.id))
         await interaction.response.send_message(f"❌ `{user.display_name}` has been dismissed as a leader.", ephemeral=True)
 
@@ -138,7 +158,7 @@ class UnionCommands(commands.Cog):
     @app_commands.describe(user="User to add to your union")
     async def add_user_to_union(self, interaction: discord.Interaction, user: discord.Member):
         leader_id = str(interaction.user.id)
-        async with await get_connection() as conn:
+        async with get_connection() as conn:
             leader = await conn.fetchrow("SELECT role_id FROM leaders WHERE user_id = $1", leader_id)
             if not leader:
                 await interaction.response.send_message("❌ You are not a union leader.", ephemeral=True)
@@ -152,7 +172,7 @@ class UnionCommands(commands.Cog):
     @app_commands.describe(user="User to remove from your union")
     async def remove_user_from_union(self, interaction: discord.Interaction, user: discord.Member):
         leader_id = str(interaction.user.id)
-        async with await get_connection() as conn:
+        async with get_connection() as conn:
             leader = await conn.fetchrow("SELECT role_id FROM leaders WHERE user_id = $1", leader_id)
             if not leader:
                 await interaction.response.send_message("❌ You are not a union leader.", ephemeral=True)
@@ -165,7 +185,7 @@ class UnionCommands(commands.Cog):
     @app_commands.command(name="show_union_detail", description="Show all registered union roles and member counts")
     async def show_union_detail(self, interaction: discord.Interaction):
         guild = interaction.guild
-        async with await get_connection() as conn:
+        async with get_connection() as conn:
             unions = await conn.fetch("SELECT role_id, name FROM unions")
             members = await conn.fetch("SELECT role_id, COUNT(*) FROM users WHERE role_id IS NOT NULL GROUP BY role_id")
 
