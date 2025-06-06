@@ -3,35 +3,97 @@ from discord import app_commands
 from discord.ext import commands
 from utils.db import get_connection
 
+class UnionRoleSelect(discord.ui.Select):
+    def __init__(self, username: str, action: str, user_obj: discord.Member, command_user: discord.Member):
+        self.username = username
+        self.action = action  # "add" or "remove"
+        self.user_obj = user_obj
+        self.command_user = command_user
+        
+        options = []
+        super().__init__(placeholder="Choose a union role...", min_values=1, max_values=1, options=options)
+    
+    async def callback(self, interaction: discord.Interaction):
+        # Get the selected role
+        selected_role_id = int(self.values[0])
+        role_obj = interaction.guild.get_role(selected_role_id)
+        
+        if not role_obj:
+            await interaction.response.send_message("❌ Selected role not found.", ephemeral=True)
+            return
+        
+        # Get the UnionCommands cog to access its methods
+        cog = interaction.client.get_cog('UnionCommands')
+        if not cog:
+            await interaction.response.send_message("❌ Union commands not available.", ephemeral=True)
+            return
+        
+        # Check permissions
+        has_admin_permission = cog.has_admin_or_mod_permissions(self.command_user)
+        
+        conn = await get_connection()
+        try:
+            # Check if the role is registered as a union
+            role_id = role_obj.id
+            union_role = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role_id)
+            if not union_role:
+                await interaction.response.send_message(f"❌ `{role_obj.name}` is not a registered union role.")
+                return
+            
+            # Check if they're a union leader for this specific role
+            leader_id = int(self.command_user.id)
+            is_union_leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", leader_id, role_id)
+            
+            # If not Admin and not union leader, deny access
+            if not has_admin_permission and not is_union_leader:
+                await interaction.response.send_message(f"❌ You are not a leader of `{role_obj.name}` union and don't have override permissions.")
+                return
+            
+            if self.action == "add":
+                # Add user to union
+                user_id = int(self.user_obj.id)
+                await conn.execute(
+                    "INSERT INTO users (username, user_id, union_role_id) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET username = $1, union_role_id = $3",
+                    self.user_obj.name, user_id, str(role_id)
+                )
+                await self.user_obj.add_roles(role_obj)
+                
+                permission_note = " (Admin override)" if has_admin_permission and not is_union_leader else ""
+                await interaction.response.send_message(f"✅ {self.user_obj.mention} added to union `{role_obj.name}`{permission_note}.")
+                
+            else:  # remove
+                # Remove user from union
+                user_id = int(self.user_obj.id)
+                await conn.execute("UPDATE users SET union_role_id = NULL WHERE user_id = $1", user_id)
+                await self.user_obj.remove_roles(role_obj)
+                
+                permission_note = " (Admin override)" if has_admin_permission and not is_union_leader else ""
+                await interaction.response.send_message(f"✅ {self.user_obj.mention} removed from union `{role_obj.name}`{permission_note}.")
+                
+        finally:
+            await conn.close()
+
+class UnionRoleView(discord.ui.View):
+    def __init__(self, username: str, action: str, user_obj: discord.Member, command_user: discord.Member, union_roles: list):
+        super().__init__(timeout=60)
+        
+        # Create select options from union roles
+        options = []
+        for role in union_roles[:25]:  # Discord limit of 25 options
+            options.append(discord.SelectOption(
+                label=role.name,
+                value=str(role.id),
+                description=f"Union role: {role.name}"
+            ))
+        
+        if options:
+            select = UnionRoleSelect(username, action, user_obj, command_user)
+            select.options = options
+            self.add_item(select)
+
 class UnionCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.union_role_cache = {}  # Cache: {role_name: role_id}
-        
-    async def cog_load(self):
-        """Load union roles when the cog is loaded"""
-        await self.refresh_union_roles_cache()
-    
-    async def refresh_union_roles_cache(self):
-        """Refresh the cache of union role names and IDs"""
-        try:
-            conn = await get_connection()
-            try:
-                union_roles = await conn.fetch("SELECT role_id FROM union_roles")
-                self.union_role_cache = {}
-                
-                guild = self.bot.guilds[0] if self.bot.guilds else None  # Get first guild
-                if guild:
-                    for row in union_roles:
-                        role = guild.get_role(row['role_id'])
-                        if role:
-                            self.union_role_cache[role.name] = role.id
-                            
-            finally:
-                await conn.close()
-        except Exception as e:
-            print(f"Error refreshing union roles cache: {e}")
-            self.union_role_cache = {}
     
     async def union_role_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         """Autocomplete for union role parameters - only shows registered union roles"""
@@ -259,8 +321,8 @@ class UnionCommands(commands.Cog):
 
     # /add_user_to_union
     @app_commands.command(name="add_user_to_union", description="Add a user to a union")
-    @app_commands.describe(username="The Discord username of the user to add", role="The union role to add them to")
-    @app_commands.autocomplete(username=username_autocomplete, role=union_role_autocomplete)
+    @app_commands.describe(username="The Discord username of the user to add", role="Type the exact union role name")
+    @app_commands.autocomplete(username=username_autocomplete)
     async def add_user_to_union(self, interaction: discord.Interaction, username: str, role: str):
         # Find the user by username
         user = self.find_user_by_name(interaction.guild, username)
@@ -316,8 +378,8 @@ class UnionCommands(commands.Cog):
 
     # /remove_user_from_union
     @app_commands.command(name="remove_user_from_union", description="Remove a user from a union")
-    @app_commands.describe(username="The Discord username of the user to remove", role="The union role to remove them from")
-    @app_commands.autocomplete(username=username_autocomplete, role=union_role_autocomplete)
+    @app_commands.describe(username="The Discord username of the user to remove", role="Type the exact union role name")
+    @app_commands.autocomplete(username=username_autocomplete)
     async def remove_user_from_union(self, interaction: discord.Interaction, username: str, role: str):
         # Find the user by username
         user = self.find_user_by_name(interaction.guild, username)
