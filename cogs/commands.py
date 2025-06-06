@@ -428,15 +428,13 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(UnionCommands(bot))
 
     # /show_union_detail
-    @app_commands.command(name="show_union_detail", description="Show all registered union roles with member lists")
+    @app_commands.command(name="show_union_detail", description="Show all union roles with member lists")
     async def show_union_detail(self, interaction: discord.Interaction):
         guild = interaction.guild
         conn = await get_connection()
         try:
             unions = await conn.fetch("SELECT role_id FROM union_roles")
-            # Get all users with their union roles, usernames, and IGNs
             members = await conn.fetch("SELECT union_role_id, username, user_id, ign FROM users WHERE union_role_id IS NOT NULL ORDER BY username")
-            # Get all union leaders
             leaders = await conn.fetch("SELECT user_id, role_id FROM union_leaders")
         finally:
             await conn.close()
@@ -445,10 +443,10 @@ async def setup(bot: commands.Bot):
             await interaction.response.send_message("📭 No unions found.")
             return
 
-        # Create a set of leader user_ids for each role for quick lookup
+        # Create leader lookup map
         leader_map = {}
         for leader in leaders:
-            role_id = str(leader['role_id'])  # Convert to string to match union_role_id format
+            role_id = str(leader['role_id'])
             if role_id not in leader_map:
                 leader_map[role_id] = set()
             leader_map[role_id].add(leader['user_id'])
@@ -463,8 +461,8 @@ async def setup(bot: commands.Bot):
 
         lines = []
         for row in unions:
-            rid = row['role_id']  # This is already an integer from DB
-            role = guild.get_role(rid)  # Use directly, no int() conversion needed
+            rid = row['role_id']
+            role = guild.get_role(rid)
             if role:
                 role_members = union_members.get(str(rid), [])
                 member_count = len(role_members)
@@ -473,38 +471,30 @@ async def setup(bot: commands.Bot):
                 
                 if role_members:
                     for member in role_members:
-                        # Try to get the Discord member to access display name
                         discord_member = guild.get_member(member['user_id'])
                         if discord_member:
                             display_name = discord_member.display_name
                         else:
-                            # Fallback to stored username if member not found in guild
                             display_name = member['username']
                         
-                        # Check if this user is a leader of this union
                         is_leader = str(rid) in leader_map and member['user_id'] in leader_map[str(rid)]
                         crown_emoji = " 👑" if is_leader else ""
-                        
                         ign = member['ign'] or "No IGN"
                         lines.append(f"  • **{display_name}**{crown_emoji} | IGN: `{ign}`")
                 else:
                     lines.append("  • No members")
                 
-                lines.append("")  # Add empty line between unions
+                lines.append("")
 
-        # Remove the last empty line
         if lines and lines[-1] == "":
             lines.pop()
 
-        # Split into chunks if message is too long (Discord has 2000 character limit)
         message = "\n".join(lines)
         if len(message) <= 2000:
             await interaction.response.send_message(message)
         else:
-            # Split into multiple messages
             chunks = []
             current_chunk = ""
-            
             for line in lines:
                 if len(current_chunk + line + "\n") <= 2000:
                     current_chunk += line + "\n"
@@ -516,10 +506,7 @@ async def setup(bot: commands.Bot):
             if current_chunk:
                 chunks.append(current_chunk.rstrip())
             
-            # Send first chunk as response
             await interaction.response.send_message(chunks[0])
-            
-            # Send remaining chunks as follow-ups
             for chunk in chunks[1:]:
                 await interaction.followup.send(chunk)
 
