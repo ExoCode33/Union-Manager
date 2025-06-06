@@ -109,6 +109,44 @@ class UnionCommands(commands.Cog):
         
         await interaction.response.send_message(f"✅ IGN for **{user_display}** set to `{ign}`")
 
+    # /deregister_ign
+    @app_commands.command(name="deregister_ign", description="Remove a user's IGN registration")
+    @app_commands.describe(username="The Discord username of the user")
+    @app_commands.autocomplete(username=username_autocomplete)
+    async def deregister_ign(self, interaction: discord.Interaction, username: str):
+        # First try to find user by name
+        user = self.find_user_by_name(interaction.guild, username)
+        
+        if not user:
+            # If not found by name, try to parse as ID/mention
+            try:
+                user_id = self.extract_user_id(username)
+                try:
+                    user = await interaction.guild.fetch_member(user_id)
+                except:
+                    await interaction.response.send_message(f"❌ User not found: `{username}`")
+                    return
+            except ValueError:
+                await interaction.response.send_message(f"❌ User not found: `{username}`")
+                return
+        
+        user_display = f"{user.display_name} ({user.name})"
+        
+        conn = await get_connection()
+        try:
+            # Check if user exists in database
+            user_data = await conn.fetchrow("SELECT username, ign FROM users WHERE user_id = $1", user.id)
+            if not user_data or not user_data['ign']:
+                await interaction.response.send_message(f"⚠️ **{user_display}** has no IGN registered.")
+                return
+            
+            # Remove IGN but keep other data
+            await conn.execute("UPDATE users SET ign = NULL WHERE user_id = $1", user.id)
+        finally:
+            await conn.close()
+        
+        await interaction.response.send_message(f"✅ IGN removed for **{user_display}**")
+
     # /search_user
     @app_commands.command(name="search_user", description="Search for a user by Discord username")
     @app_commands.describe(username="The Discord username of the user to search")
