@@ -1,11 +1,20 @@
 import asyncpg
 import os
+from urllib.parse import urlparse
 
 async def get_connection():
+    database_url = os.getenv("DATABASE_URL")
+
+    if not database_url:
+        raise RuntimeError("DATABASE_URL environment variable not set")
+
+    result = urlparse(database_url)
+
     return await asyncpg.connect(
-        host=os.getenv("PGHOST"),
-        user=os.getenv("PGUSER"),
-        password=os.getenv("PGPASSWORD"),
-        database=os.getenv("PGDATABASE"),
-        port=int(os.getenv("PGPORT", 5432))
+        user=result.username,
+        password=result.password,
+        database=result.path[1:],
+        host=result.hostname,
+        port=result.port,
+        ssl='require'
     )
