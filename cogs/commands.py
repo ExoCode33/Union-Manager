@@ -443,7 +443,6 @@ async def setup(bot: commands.Bot):
             await interaction.response.send_message("📭 No unions found.")
             return
 
-        # Create leader lookup map
         leader_map = {}
         for leader in leaders:
             role_id = str(leader['role_id'])
@@ -451,7 +450,6 @@ async def setup(bot: commands.Bot):
                 leader_map[role_id] = set()
             leader_map[role_id].add(leader['user_id'])
 
-        # Group members by union role
         union_members = {}
         for member in members:
             role_id = member['union_role_id']
@@ -490,25 +488,7 @@ async def setup(bot: commands.Bot):
             lines.pop()
 
         message = "\n".join(lines)
-        if len(message) <= 2000:
-            await interaction.response.send_message(message)
-        else:
-            chunks = []
-            current_chunk = ""
-            for line in lines:
-                if len(current_chunk + line + "\n") <= 2000:
-                    current_chunk += line + "\n"
-                else:
-                    if current_chunk:
-                        chunks.append(current_chunk.rstrip())
-                    current_chunk = line + "\n"
-            
-            if current_chunk:
-                chunks.append(current_chunk.rstrip())
-            
-            await interaction.response.send_message(chunks[0])
-            for chunk in chunks[1:]:
-                await interaction.followup.send(chunk)
+        await interaction.response.send_message(message)
 
 
 async def setup(bot: commands.Bot):
