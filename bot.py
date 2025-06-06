@@ -9,9 +9,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    # ✅ Ensure database schema exists
+    # ✅ Ensure required tables exist
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             discord_id TEXT PRIMARY KEY,
@@ -33,16 +34,13 @@ async def on_ready():
     conn.commit()
     conn.close()
 
-    # ✅ Load your merged slash command cog
+    # ✅ Load command cog
     await bot.load_extension("cogs.commands")
     print("✅ Loaded cogs.commands")
 
-    # ✅ Force slash command sync to your server only (instant visibility)
-    GUILD_ID = 123456789012345678  # 🔁 Replace with your actual Discord server ID
-    guild = discord.Object(id=GUILD_ID)
-    synced = await bot.tree.sync(guild=guild)
-
+    # ✅ Sync commands globally (prevents permission errors)
+    synced = await bot.tree.sync()
+    print(f"✅ Synced {len(synced)} commands globally")
     print(f"✅ Bot is ready. Logged in as {bot.user}")
-    print(f"✅ Synced {len(synced)} commands to guild {GUILD_ID}: {[cmd.name for cmd in synced]}")
 
 bot.run(TOKEN)
