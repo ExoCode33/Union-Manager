@@ -312,30 +312,79 @@ class UnionCommands(commands.Cog):
         await interaction.response.send_message(f"✅ {user.mention} removed from union `{role.name}`{permission_note}.", ephemeral=True)
 
     # /show_union_detail
-    @app_commands.command(name="show_union_detail", description="Show all registered union roles and member counts")
+    @app_commands.command(name="show_union_detail", description="Show all registered union roles with member lists")
     async def show_union_detail(self, interaction: discord.Interaction):
         guild = interaction.guild
         conn = await get_connection()
         try:
             unions = await conn.fetch("SELECT role_id FROM union_roles")
-            members = await conn.fetch("SELECT union_role_id, COUNT(*) FROM users WHERE union_role_id IS NOT NULL GROUP BY union_role_id")
+            # Get all users with their union roles, usernames, and IGNs
+            members = await conn.fetch("SELECT union_role_id, username, ign FROM users WHERE union_role_id IS NOT NULL ORDER BY username")
         finally:
             await conn.close()
 
-        count_map = {row['union_role_id']: row['count'] for row in members}
         if not unions:
             await interaction.response.send_message("📭 No unions found.", ephemeral=True)
             return
+
+        # Group members by union role
+        union_members = {}
+        for member in members:
+            role_id = member['union_role_id']
+            if role_id not in union_members:
+                union_members[role_id] = []
+            union_members[role_id].append(member)
 
         lines = []
         for row in unions:
             rid = row['role_id']  # This is already an integer from DB
             role = guild.get_role(rid)  # Use directly, no int() conversion needed
             if role:
-                # Convert rid to string for comparison with count_map keys (since union_role_id is stored as string)
-                lines.append(f"{role.mention} — {count_map.get(str(rid), 0)}/30 members")
+                role_members = union_members.get(str(rid), [])
+                member_count = len(role_members)
+                
+                lines.append(f"**{role.name}** — {member_count}/30 members")
+                
+                if role_members:
+                    for member in role_members:
+                        username = member['username']
+                        ign = member['ign'] or "No IGN"
+                        lines.append(f"  • **{username}** | IGN: `{ign}`")
+                else:
+                    lines.append("  • No members")
+                
+                lines.append("")  # Add empty line between unions
 
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        # Remove the last empty line
+        if lines and lines[-1] == "":
+            lines.pop()
+
+        # Split into chunks if message is too long (Discord has 2000 character limit)
+        message = "\n".join(lines)
+        if len(message) <= 2000:
+            await interaction.response.send_message(message, ephemeral=True)
+        else:
+            # Split into multiple messages
+            chunks = []
+            current_chunk = ""
+            
+            for line in lines:
+                if len(current_chunk + line + "\n") <= 2000:
+                    current_chunk += line + "\n"
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk.rstrip())
+                    current_chunk = line + "\n"
+            
+            if current_chunk:
+                chunks.append(current_chunk.rstrip())
+            
+            # Send first chunk as response
+            await interaction.response.send_message(chunks[0], ephemeral=True)
+            
+            # Send remaining chunks as follow-ups
+            for chunk in chunks[1:]:
+                await interaction.followup.send(chunk, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
