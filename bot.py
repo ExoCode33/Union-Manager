@@ -3,19 +3,19 @@ from discord.ext import commands
 import os
 import sqlite3
 
-# Load the bot token from the environment
+# Load your Discord bot token from environment variable
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# Enable all intents (required for role/member operations)
+# Enable all necessary intents
 intents = discord.Intents.all()
 
-# Create bot instance with slash command support
+# Create the bot instance
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 @bot.event
 async def on_ready():
-    # ✅ Set up the database and required tables
+    # ✅ Ensure the SQLite database and required tables exist
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
@@ -40,15 +40,15 @@ async def on_ready():
     conn.commit()
     conn.close()
 
-    # ✅ Load slash command cog
+    # ✅ Load all bot command extensions
     await bot.load_extension("cogs.commands")
     print("✅ Loaded cogs.commands")
 
-    # ✅ Sync all slash commands globally (no specific guild to avoid 403 error)
+    # ✅ Sync slash commands globally
     synced = await bot.tree.sync()
     print(f"✅ Synced {len(synced)} commands globally")
     print(f"✅ Bot is ready. Logged in as {bot.user}")
 
 
-# ✅ Run the bot
+# ✅ Start the bot
 bot.run(TOKEN)
