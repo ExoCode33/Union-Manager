@@ -423,6 +423,10 @@ class UnionCommands(commands.Cog):
         message = "\n".join(lines)
         await interaction.response.send_message(message)
 
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(UnionCommands(bot))
+
     # /show_union_detail
     @app_commands.command(name="show_union_detail", description="Show all registered union roles with member lists")
     async def show_union_detail(self, interaction: discord.Interaction):
