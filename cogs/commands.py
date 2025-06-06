@@ -4,14 +4,26 @@ from discord.ext import commands
 from utils.db import get_connection
 
 class UnionRoleSelect(discord.ui.Select):
-    def __init__(self, username: str, action: str, user_obj: discord.Member, command_user: discord.Member):
-        self.username = username
+    def __init__(self, action: str, user_obj: discord.Member, command_user: discord.Member, union_roles: list):
         self.action = action  # "add" or "remove"
         self.user_obj = user_obj
         self.command_user = command_user
         
+        # Create options from union roles
         options = []
-        super().__init__(placeholder="Choose a union role...", min_values=1, max_values=1, options=options)
+        for role in union_roles[:25]:  # Discord limit of 25 options
+            options.append(discord.SelectOption(
+                label=role.name,
+                value=str(role.id),
+                description=f"Union: {role.name[:50]}"  # Truncate long names
+            ))
+        
+        super().__init__(
+            placeholder="Choose a union role...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
     
     async def callback(self, interaction: discord.Interaction):
         # Get the selected role
@@ -19,13 +31,13 @@ class UnionRoleSelect(discord.ui.Select):
         role_obj = interaction.guild.get_role(selected_role_id)
         
         if not role_obj:
-            await interaction.response.send_message("❌ Selected role not found.", ephemeral=True)
+            await interaction.response.send_message("❌ Selected role not found.")
             return
         
         # Get the UnionCommands cog to access its methods
         cog = interaction.client.get_cog('UnionCommands')
         if not cog:
-            await interaction.response.send_message("❌ Union commands not available.", ephemeral=True)
+            await interaction.response.send_message("❌ Union commands not available.")
             return
         
         # Check permissions
@@ -74,21 +86,11 @@ class UnionRoleSelect(discord.ui.Select):
             await conn.close()
 
 class UnionRoleView(discord.ui.View):
-    def __init__(self, username: str, action: str, user_obj: discord.Member, command_user: discord.Member, union_roles: list):
+    def __init__(self, action: str, user_obj: discord.Member, command_user: discord.Member, union_roles: list):
         super().__init__(timeout=60)
         
-        # Create select options from union roles
-        options = []
-        for role in union_roles[:25]:  # Discord limit of 25 options
-            options.append(discord.SelectOption(
-                label=role.name,
-                value=str(role.id),
-                description=f"Union role: {role.name}"
-            ))
-        
-        if options:
-            select = UnionRoleSelect(username, action, user_obj, command_user)
-            select.options = options
+        if union_roles:
+            select = UnionRoleSelect(action, user_obj, command_user, union_roles)
             self.add_item(select)
 
 class UnionCommands(commands.Cog):
