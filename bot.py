@@ -9,7 +9,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    # ✅ Ensure database and tables exist with safe column names
+    # ✅ Ensure the database and required tables exist
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
@@ -37,13 +37,12 @@ async def on_ready():
     conn.commit()
     conn.close()
 
-    # ✅ Load slash command cogs
-    await bot.load_extension("cogs.ign_commands")
+    # ✅ Load commands from the unified cog
+    await bot.load_extension("cogs.commands")
 
-    # ✅ Sync slash commands with Discord
+    # ✅ Sync slash commands globally (or use guild-specific if testing)
     await bot.tree.sync()
 
     print(f"✅ Bot is ready. Logged in as {bot.user}")
 
-# ✅ Start the bot
 bot.run(TOKEN)
