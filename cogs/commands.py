@@ -6,6 +6,24 @@ from utils.db import get_connection
 class UnionCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.union_role_ids = set()  # Cache for union role IDs
+        
+    async def cog_load(self):
+        """Load union roles when the cog is loaded"""
+        await self.refresh_union_roles_cache()
+    
+    async def refresh_union_roles_cache(self):
+        """Refresh the cache of union role IDs"""
+        try:
+            conn = await get_connection()
+            try:
+                union_roles = await conn.fetch("SELECT role_id FROM union_roles")
+                self.union_role_ids = {row['role_id'] for row in union_roles}
+            finally:
+                await conn.close()
+        except Exception as e:
+            print(f"Error refreshing union roles cache: {e}")
+            self.union_role_ids = set()
     
     async def union_role_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         """Autocomplete for union role parameters - only shows registered union roles"""
@@ -166,6 +184,9 @@ class UnionCommands(commands.Cog):
         finally:
             await conn.close()
         
+        # Refresh the cache after adding a new union role
+        await self.refresh_union_roles_cache()
+        
         await interaction.response.send_message(f"✅ Registered union: `{role.name}`")
 
     # /deregister_role_as_union
@@ -178,6 +199,9 @@ class UnionCommands(commands.Cog):
             await conn.execute("DELETE FROM union_roles WHERE role_id = $1", role_id)
         finally:
             await conn.close()
+        
+        # Refresh the cache after removing a union role
+        await self.refresh_union_roles_cache()
         
         await interaction.response.send_message(f"🗑️ Deregistered union: `{role.name}`")
 
@@ -228,8 +252,8 @@ class UnionCommands(commands.Cog):
     # /add_user_to_union
     @app_commands.command(name="add_user_to_union", description="Add a user to a union")
     @app_commands.describe(username="The Discord username of the user to add", role="The union role to add them to")
-    @app_commands.autocomplete(username=username_autocomplete)
-    async def add_user_to_union(self, interaction: discord.Interaction, username: str, role: discord.Role):
+    @app_commands.autocomplete(username=username_autocomplete, role=union_role_autocomplete)
+    async def add_user_to_union(self, interaction: discord.Interaction, username: str, role: str):
         # Find the user by username
         user = self.find_user_by_name(interaction.guild, username)
         
@@ -285,8 +309,8 @@ class UnionCommands(commands.Cog):
     # /remove_user_from_union
     @app_commands.command(name="remove_user_from_union", description="Remove a user from a union")
     @app_commands.describe(username="The Discord username of the user to remove", role="The union role to remove them from")
-    @app_commands.autocomplete(username=username_autocomplete)
-    async def remove_user_from_union(self, interaction: discord.Interaction, username: str, role: discord.Role):
+    @app_commands.autocomplete(username=username_autocomplete, role=union_role_autocomplete)
+    async def remove_user_from_union(self, interaction: discord.Interaction, username: str, role: str):
         # Find the user by username
         user = self.find_user_by_name(interaction.guild, username)
         
