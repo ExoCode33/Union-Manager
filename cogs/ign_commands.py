@@ -2,7 +2,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import sqlite3
+import os
 from utils.permissions import is_manager
+
+# ✅ Always use absolute path to DB (consistent with bot.py)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "..", "database.db")
 
 class IGNCommands(commands.Cog):
     def __init__(self, bot):
@@ -16,8 +21,7 @@ class IGNCommands(commands.Cog):
             return
 
         try:
-            # Safe DB connection per command
-            conn = sqlite3.connect("database.db")
+            conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
 
             cursor.execute("INSERT OR REPLACE INTO users (discord_id, ign) VALUES (?, ?)", (str(user.id), ign))
@@ -26,8 +30,9 @@ class IGNCommands(commands.Cog):
 
             await interaction.response.send_message(f"✅ {user.mention}'s IGN has been registered as `{ign}`.")
         except Exception as e:
+            print(f"DB ERROR: {e}")
             await interaction.response.send_message("⚠️ An error occurred while registering IGN.", ephemeral=True)
-            print(f"[DB ERROR] {e}")
 
 async def setup(bot):
     await bot.add_cog(IGNCommands(bot))
+
