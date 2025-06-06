@@ -25,6 +25,7 @@ class UnionCommands(commands.Cog):
             app_commands.Choice(name=f"{member.display_name} ({member.name})", value=member.name)
             for member in members
         ]
+    
     def find_user_by_name(self, guild: discord.Guild, username: str) -> discord.Member:
         """Find a user in the guild by their username or display name"""
         username_lower = username.lower()
