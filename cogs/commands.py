@@ -192,46 +192,90 @@ class UnionCommands(commands.Cog):
         
         await interaction.response.send_message(f"❌ `{user.display_name}` has been dismissed as a leader.", ephemeral=True)
 
+    def has_admin_or_mod_permissions(self, member: discord.Member) -> bool:
+        """Check if user has Admin or Mod permissions"""
+        # Check for Administrator permission
+        if member.guild_permissions.administrator:
+            return True
+        
+        # Check for roles named "Admin", "Mod", "Moderator" (case insensitive)
+        admin_mod_roles = {'admin', 'mod', 'moderator'}
+        for role in member.roles:
+            if role.name.lower() in admin_mod_roles:
+                return True
+        
+        return False
+
     # /add_user_to_union
-    @app_commands.command(name="add_user_to_union", description="Add a user to your union")
-    @app_commands.describe(user="User to add to your union")
-    async def add_user_to_union(self, interaction: discord.Interaction, user: discord.Member):
-        leader_id = interaction.user.id  # Fixed: Use ID directly as integer
+    @app_commands.command(name="add_user_to_union", description="Add a user to a union")
+    @app_commands.describe(user="User to add to the union", role="The union role to add them to")
+    async def add_user_to_union(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
+        # Check permissions: Must be Admin/Mod OR union leader of the specified role
+        has_override_permission = self.has_admin_or_mod_permissions(interaction.user)
+        
         conn = await get_connection()
         try:
-            leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1", leader_id)
-            if not leader:
-                await interaction.response.send_message("❌ You are not a union leader.", ephemeral=True)
+            # Check if the role is registered as a union
+            role_id = int(role.id) if isinstance(role.id, str) else role.id
+            union_role = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role_id)
+            if not union_role:
+                await interaction.response.send_message(f"❌ `{role.name}` is not a registered union role.", ephemeral=True)
                 return
             
+            # If not Admin/Mod, check if they're a union leader for this specific role
+            if not has_override_permission:
+                leader_id = int(interaction.user.id) if isinstance(interaction.user.id, str) else interaction.user.id
+                leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", leader_id, role_id)
+                if not leader:
+                    await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.", ephemeral=True)
+                    return
+            
             # Insert or update user with union role and username
+            user_id = int(user.id) if isinstance(user.id, str) else user.id
             await conn.execute(
                 "INSERT INTO users (username, user_id, union_role_id) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET username = $1, union_role_id = $3",
-                user.name, user.id, leader['role_id']
+                user.name, user_id, role_id
             )
         finally:
             await conn.close()
         
-        await user.add_roles(discord.Object(id=leader['role_id']))  # role_id from DB is already integer
-        await interaction.response.send_message(f"✅ {user.mention} added to your union.", ephemeral=True)
+        await user.add_roles(role)
+        permission_note = " (Admin/Mod override)" if has_override_permission else ""
+        await interaction.response.send_message(f"✅ {user.mention} added to union `{role.name}`{permission_note}.", ephemeral=True)
 
     # /remove_user_from_union
-    @app_commands.command(name="remove_user_from_union", description="Remove a user from your union")
-    @app_commands.describe(user="User to remove from your union")
-    async def remove_user_from_union(self, interaction: discord.Interaction, user: discord.Member):
-        leader_id = interaction.user.id  # Fixed: Use ID directly as integer
+    @app_commands.command(name="remove_user_from_union", description="Remove a user from a union")
+    @app_commands.describe(user="User to remove from the union", role="The union role to remove them from")
+    async def remove_user_from_union(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
+        # Check permissions: Must be Admin/Mod OR union leader of the specified role
+        has_override_permission = self.has_admin_or_mod_permissions(interaction.user)
+        
         conn = await get_connection()
         try:
-            leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1", leader_id)
-            if not leader:
-                await interaction.response.send_message("❌ You are not a union leader.", ephemeral=True)
+            # Check if the role is registered as a union
+            role_id = int(role.id) if isinstance(role.id, str) else role.id
+            union_role = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role_id)
+            if not union_role:
+                await interaction.response.send_message(f"❌ `{role.name}` is not a registered union role.", ephemeral=True)
                 return
-            await conn.execute("UPDATE users SET union_role_id = NULL WHERE user_id = $1", user.id)  # Fixed: Use user.id directly
+            
+            # If not Admin/Mod, check if they're a union leader for this specific role
+            if not has_override_permission:
+                leader_id = int(interaction.user.id) if isinstance(interaction.user.id, str) else interaction.user.id
+                leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", leader_id, role_id)
+                if not leader:
+                    await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.", ephemeral=True)
+                    return
+            
+            # Remove user from union (set union_role_id to NULL)
+            user_id = int(user.id) if isinstance(user.id, str) else user.id
+            await conn.execute("UPDATE users SET union_role_id = NULL WHERE user_id = $1", user_id)
         finally:
             await conn.close()
         
-        await user.remove_roles(discord.Object(id=leader['role_id']))  # role_id from DB is already integer
-        await interaction.response.send_message(f"✅ {user.mention} removed from your union.", ephemeral=True)
+        await user.remove_roles(role)
+        permission_note = " (Admin/Mod override)" if has_override_permission else ""
+        await interaction.response.send_message(f"✅ {user.mention} removed from union `{role.name}`{permission_note}.", ephemeral=True)
 
     # /show_union_detail
     @app_commands.command(name="show_union_detail", description="Show all registered union roles and member counts")
