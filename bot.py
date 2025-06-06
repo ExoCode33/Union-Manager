@@ -9,40 +9,40 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    # ✅ Ensure the database and required tables exist
+    # ✅ Ensure database schema exists
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
-
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        discord_id TEXT PRIMARY KEY,
-        ign TEXT,
-        union_name TEXT
-    )
+        CREATE TABLE IF NOT EXISTS users (
+            discord_id TEXT PRIMARY KEY,
+            ign TEXT,
+            union_name TEXT
+        )
     """)
-
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS union_roles (
-        role_name TEXT PRIMARY KEY
-    )
+        CREATE TABLE IF NOT EXISTS union_roles (
+            role_name TEXT PRIMARY KEY
+        )
     """)
-
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS union_leaders (
-        role_name TEXT PRIMARY KEY,
-        leader_id TEXT
-    )
+        CREATE TABLE IF NOT EXISTS union_leaders (
+            role_name TEXT PRIMARY KEY,
+            leader_id TEXT
+        )
     """)
-
     conn.commit()
     conn.close()
 
-    # ✅ Load commands from the unified cog
+    # ✅ Load your merged slash command cog
     await bot.load_extension("cogs.commands")
+    print("✅ Loaded cogs.commands")
 
-    # ✅ Sync slash commands globally (or use guild-specific if testing)
-    await bot.tree.sync()
+    # ✅ Force slash command sync to your server only (instant visibility)
+    GUILD_ID = 123456789012345678  # 🔁 Replace with your actual Discord server ID
+    guild = discord.Object(id=GUILD_ID)
+    synced = await bot.tree.sync(guild=guild)
 
     print(f"✅ Bot is ready. Logged in as {bot.user}")
+    print(f"✅ Synced {len(synced)} commands to guild {GUILD_ID}: {[cmd.name for cmd in synced]}")
 
 bot.run(TOKEN)
