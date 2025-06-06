@@ -7,6 +7,25 @@ class UnionCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
+    async def union_role_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        """Autocomplete for union role parameters - only shows registered union roles"""
+        conn = await get_connection()
+        try:
+            # Get all registered union roles
+            union_roles = await conn.fetch("SELECT role_id FROM union_roles")
+        finally:
+            await conn.close()
+        
+        guild = interaction.guild
+        choices = []
+        
+        for union_role in union_roles:
+            role = guild.get_role(union_role['role_id'])
+            if role:
+                # Filter based on what's being typed
+                if not current or current.lower() in role.name.lower():
+                    choices.append(app_commands.Choice(name=role.name, value=str(role.id)))
+        
     async def username_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         """Autocomplete for username parameters"""
         if not current:
@@ -209,8 +228,8 @@ class UnionCommands(commands.Cog):
     # /add_user_to_union
     @app_commands.command(name="add_user_to_union", description="Add a user to a union")
     @app_commands.describe(username="The Discord username of the user to add", role="The union role to add them to")
-    @app_commands.autocomplete(username=username_autocomplete)
-    async def add_user_to_union(self, interaction: discord.Interaction, username: str, role: discord.Role):
+    @app_commands.autocomplete(username=username_autocomplete, role=union_role_autocomplete)
+    async def add_user_to_union(self, interaction: discord.Interaction, username: str, role: str):
         # Find the user by username
         user = self.find_user_by_name(interaction.guild, username)
         
@@ -263,8 +282,8 @@ class UnionCommands(commands.Cog):
     # /remove_user_from_union
     @app_commands.command(name="remove_user_from_union", description="Remove a user from a union")
     @app_commands.describe(username="The Discord username of the user to remove", role="The union role to remove them from")
-    @app_commands.autocomplete(username=username_autocomplete)
-    async def remove_user_from_union(self, interaction: discord.Interaction, username: str, role: discord.Role):
+    @app_commands.autocomplete(username=username_autocomplete, role=union_role_autocomplete)
+    async def remove_user_from_union(self, interaction: discord.Interaction, username: str, role: str):
         # Find the user by username
         user = self.find_user_by_name(interaction.guild, username)
         
