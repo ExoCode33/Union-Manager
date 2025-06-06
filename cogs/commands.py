@@ -212,15 +212,15 @@ class UnionCommands(commands.Cog):
         await interaction.response.send_message(f"❌ `{user.display_name}` has been dismissed as a leader.")
 
     def has_admin_or_mod_permissions(self, member: discord.Member) -> bool:
-        """Check if user has Admin or Mod permissions"""
+        """Check if user has Admin permissions"""
         # Check for Administrator permission
         if member.guild_permissions.administrator:
             return True
         
-        # Check for roles named "Admin", "Mod", "Moderator" (case insensitive)
-        admin_mod_roles = {'admin', 'mod', 'moderator'}
+        # Check for roles named "Admin" (case insensitive)
+        admin_roles = {'admin'}
         for role in member.roles:
-            if role.name.lower() in admin_mod_roles:
+            if role.name.lower() in admin_roles:
                 return True
         
         return False
@@ -228,8 +228,8 @@ class UnionCommands(commands.Cog):
     # /add_user_to_union
     @app_commands.command(name="add_user_to_union", description="Add a user to a union")
     @app_commands.describe(username="The Discord username of the user to add", role="The union role to add them to")
-    @app_commands.autocomplete(username=username_autocomplete, role=union_role_autocomplete)
-    async def add_user_to_union(self, interaction: discord.Interaction, username: str, role: str):
+    @app_commands.autocomplete(username=username_autocomplete)
+    async def add_user_to_union(self, interaction: discord.Interaction, username: str, role: discord.Role):
         # Find the user by username
         user = self.find_user_by_name(interaction.guild, username)
         
@@ -246,8 +246,8 @@ class UnionCommands(commands.Cog):
                 await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
                 return
         
-        # Check permissions: Must be Admin/Mod OR union leader of the specified role
-        has_override_permission = self.has_admin_or_mod_permissions(interaction.user)
+        # Check permissions: Must be Admin OR union leader of the specified role
+        has_admin_permission = self.has_admin_or_mod_permissions(interaction.user)
         
         conn = await get_connection()
         try:
@@ -258,13 +258,14 @@ class UnionCommands(commands.Cog):
                 await interaction.response.send_message(f"❌ `{role.name}` is not a registered union role.")
                 return
             
-            # If not Admin/Mod, check if they're a union leader for this specific role
-            if not has_override_permission:
-                leader_id = int(interaction.user.id) if isinstance(interaction.user.id, str) else interaction.user.id
-                leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", leader_id, role_id)
-                if not leader:
-                    await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.")
-                    return
+            # Check if they're a union leader for this specific role
+            leader_id = int(interaction.user.id) if isinstance(interaction.user.id, str) else interaction.user.id
+            is_union_leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", leader_id, role_id)
+            
+            # If not Admin and not union leader, deny access
+            if not has_admin_permission and not is_union_leader:
+                await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.")
+                return
             
             # Insert or update user with union role and username
             user_id = int(user.id) if isinstance(user.id, str) else user.id
@@ -276,14 +277,16 @@ class UnionCommands(commands.Cog):
             await conn.close()
         
         await user.add_roles(role)
-        permission_note = " (Admin/Mod override)" if has_override_permission else ""
+        
+        # Show admin override only if admin is not the union leader
+        permission_note = " (Admin override)" if has_admin_permission and not is_union_leader else ""
         await interaction.response.send_message(f"✅ {user.mention} added to union `{role.name}`{permission_note}.")
 
     # /remove_user_from_union
     @app_commands.command(name="remove_user_from_union", description="Remove a user from a union")
     @app_commands.describe(username="The Discord username of the user to remove", role="The union role to remove them from")
-    @app_commands.autocomplete(username=username_autocomplete, role=union_role_autocomplete)
-    async def remove_user_from_union(self, interaction: discord.Interaction, username: str, role: str):
+    @app_commands.autocomplete(username=username_autocomplete)
+    async def remove_user_from_union(self, interaction: discord.Interaction, username: str, role: discord.Role):
         # Find the user by username
         user = self.find_user_by_name(interaction.guild, username)
         
@@ -300,8 +303,8 @@ class UnionCommands(commands.Cog):
                 await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
                 return
         
-        # Check permissions: Must be Admin/Mod OR union leader of the specified role
-        has_override_permission = self.has_admin_or_mod_permissions(interaction.user)
+        # Check permissions: Must be Admin OR union leader of the specified role
+        has_admin_permission = self.has_admin_or_mod_permissions(interaction.user)
         
         conn = await get_connection()
         try:
@@ -312,13 +315,14 @@ class UnionCommands(commands.Cog):
                 await interaction.response.send_message(f"❌ `{role.name}` is not a registered union role.")
                 return
             
-            # If not Admin/Mod, check if they're a union leader for this specific role
-            if not has_override_permission:
-                leader_id = int(interaction.user.id) if isinstance(interaction.user.id, str) else interaction.user.id
-                leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", leader_id, role_id)
-                if not leader:
-                    await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.")
-                    return
+            # Check if they're a union leader for this specific role
+            leader_id = int(interaction.user.id) if isinstance(interaction.user.id, str) else interaction.user.id
+            is_union_leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", leader_id, role_id)
+            
+            # If not Admin and not union leader, deny access
+            if not has_admin_permission and not is_union_leader:
+                await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.")
+                return
             
             # Remove user from union (set union_role_id to NULL)
             user_id = int(user.id) if isinstance(user.id, str) else user.id
@@ -327,7 +331,9 @@ class UnionCommands(commands.Cog):
             await conn.close()
         
         await user.remove_roles(role)
-        permission_note = " (Admin/Mod override)" if has_override_permission else ""
+        
+        # Show admin override only if admin is not the union leader
+        permission_note = " (Admin override)" if has_admin_permission and not is_union_leader else ""
         await interaction.response.send_message(f"✅ {user.mention} removed from union `{role.name}`{permission_note}.")
 
     # /show_union_leader
