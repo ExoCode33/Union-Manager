@@ -319,12 +319,12 @@ class UnionCommands(commands.Cog):
         try:
             unions = await conn.fetch("SELECT role_id FROM union_roles")
             # Get all users with their union roles, usernames, and IGNs
-            members = await conn.fetch("SELECT union_role_id, username, ign FROM users WHERE union_role_id IS NOT NULL ORDER BY username")
+            members = await conn.fetch("SELECT union_role_id, username, user_id, ign FROM users WHERE union_role_id IS NOT NULL ORDER BY username")
         finally:
             await conn.close()
 
         if not unions:
-            await interaction.response.send_message("📭 No unions found.", ephemeral=True)
+            await interaction.response.send_message("📭 No unions found.")
             return
 
         # Group members by union role
@@ -347,9 +347,16 @@ class UnionCommands(commands.Cog):
                 
                 if role_members:
                     for member in role_members:
-                        username = member['username']
+                        # Try to get the Discord member to access display name
+                        discord_member = guild.get_member(member['user_id'])
+                        if discord_member:
+                            display_name = discord_member.display_name
+                        else:
+                            # Fallback to stored username if member not found in guild
+                            display_name = member['username']
+                        
                         ign = member['ign'] or "No IGN"
-                        lines.append(f"  • **{username}** | IGN: `{ign}`")
+                        lines.append(f"  • **{display_name}** | IGN: `{ign}`")
                 else:
                     lines.append("  • No members")
                 
@@ -362,7 +369,7 @@ class UnionCommands(commands.Cog):
         # Split into chunks if message is too long (Discord has 2000 character limit)
         message = "\n".join(lines)
         if len(message) <= 2000:
-            await interaction.response.send_message(message, ephemeral=True)
+            await interaction.response.send_message(message)
         else:
             # Split into multiple messages
             chunks = []
@@ -380,11 +387,11 @@ class UnionCommands(commands.Cog):
                 chunks.append(current_chunk.rstrip())
             
             # Send first chunk as response
-            await interaction.response.send_message(chunks[0], ephemeral=True)
+            await interaction.response.send_message(chunks[0])
             
             # Send remaining chunks as follow-ups
             for chunk in chunks[1:]:
-                await interaction.followup.send(chunk, ephemeral=True)
+                await interaction.followup.send(chunk)
 
 
 async def setup(bot: commands.Bot):
