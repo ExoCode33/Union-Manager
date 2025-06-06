@@ -70,10 +70,10 @@ class UnionCommands(commands.Cog):
                 try:
                     user = await interaction.guild.fetch_member(user_id)
                 except:
-                    await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                    await interaction.response.send_message(f"❌ User not found: `{username}`")
                     return
             except ValueError:
-                await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                await interaction.response.send_message(f"❌ User not found: `{username}`")
                 return
         
         user_display = f"{user.display_name} ({user.name})"
@@ -88,7 +88,7 @@ class UnionCommands(commands.Cog):
         finally:
             await conn.close()
         
-        await interaction.response.send_message(f"✅ IGN for **{user_display}** set to `{ign}`", ephemeral=True)
+        await interaction.response.send_message(f"✅ IGN for **{user_display}** set to `{ign}`")
 
     # /search_user
     @app_commands.command(name="search_user", description="Search for a user by Discord username")
@@ -105,10 +105,10 @@ class UnionCommands(commands.Cog):
                 try:
                     user = await interaction.guild.fetch_member(user_id)
                 except:
-                    await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                    await interaction.response.send_message(f"❌ User not found: `{username}`")
                     return
             except ValueError:
-                await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                await interaction.response.send_message(f"❌ User not found: `{username}`")
                 return
         
         user_display = f"{user.display_name} ({user.name})"
@@ -128,9 +128,9 @@ class UnionCommands(commands.Cog):
                 finally:
                     await conn.close()
             
-            await interaction.response.send_message(f"**Discord:** {user_display}\n**IGN:** `{user_data['ign']}`", ephemeral=True)
+            await interaction.response.send_message(f"**Discord:** {user_display}\n**IGN:** `{user_data['ign']}`")
         else:
-            await interaction.response.send_message(f"⚠️ No IGN found for **{user_display}**.", ephemeral=True)
+            await interaction.response.send_message(f"⚠️ No IGN found for **{user_display}**.")
 
     # /register_role_as_union
     @app_commands.command(name="register_role_as_union", description="Register a Discord role as a union")
@@ -147,7 +147,7 @@ class UnionCommands(commands.Cog):
         finally:
             await conn.close()
         
-        await interaction.response.send_message(f"✅ Registered union: `{role.name}`", ephemeral=True)
+        await interaction.response.send_message(f"✅ Registered union: `{role.name}`")
 
     # /deregister_role_as_union
     @app_commands.command(name="deregister_role_as_union", description="Deregister a union role")
@@ -160,7 +160,7 @@ class UnionCommands(commands.Cog):
         finally:
             await conn.close()
         
-        await interaction.response.send_message(f"🗑️ Deregistered union: `{role.name}`", ephemeral=True)
+        await interaction.response.send_message(f"🗑️ Deregistered union: `{role.name}`")
 
     # /appoint_union_leader
     @app_commands.command(name="appoint_union_leader", description="Appoint a union leader")
@@ -177,7 +177,7 @@ class UnionCommands(commands.Cog):
         finally:
             await conn.close()
         
-        await interaction.response.send_message(f"👑 `{user.display_name}` appointed as leader of `{role.name}`", ephemeral=True)
+        await interaction.response.send_message(f"👑 `{user.display_name}` appointed as leader of `{role.name}`")
 
     # /dismiss_union_leader
     @app_commands.command(name="dismiss_union_leader", description="Dismiss a union leader")
@@ -190,7 +190,7 @@ class UnionCommands(commands.Cog):
         finally:
             await conn.close()
         
-        await interaction.response.send_message(f"❌ `{user.display_name}` has been dismissed as a leader.", ephemeral=True)
+        await interaction.response.send_message(f"❌ `{user.display_name}` has been dismissed as a leader.")
 
     def has_admin_or_mod_permissions(self, member: discord.Member) -> bool:
         """Check if user has Admin or Mod permissions"""
@@ -236,7 +236,7 @@ class UnionCommands(commands.Cog):
             role_id = int(role.id) if isinstance(role.id, str) else role.id
             union_role = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role_id)
             if not union_role:
-                await interaction.response.send_message(f"❌ `{role.name}` is not a registered union role.", ephemeral=True)
+                await interaction.response.send_message(f"❌ `{role.name}` is not a registered union role.")
                 return
             
             # If not Admin/Mod, check if they're a union leader for this specific role
@@ -244,7 +244,7 @@ class UnionCommands(commands.Cog):
                 leader_id = int(interaction.user.id) if isinstance(interaction.user.id, str) else interaction.user.id
                 leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", leader_id, role_id)
                 if not leader:
-                    await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.", ephemeral=True)
+                    await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.")
                     return
             
             # Insert or update user with union role and username
@@ -258,7 +258,7 @@ class UnionCommands(commands.Cog):
         
         await user.add_roles(role)
         permission_note = " (Admin/Mod override)" if has_override_permission else ""
-        await interaction.response.send_message(f"✅ {user.mention} added to union `{role.name}`{permission_note}.", ephemeral=True)
+        await interaction.response.send_message(f"✅ {user.mention} added to union `{role.name}`{permission_note}.")
 
     # /remove_user_from_union
     @app_commands.command(name="remove_user_from_union", description="Remove a user from a union")
@@ -290,7 +290,7 @@ class UnionCommands(commands.Cog):
             role_id = int(role.id) if isinstance(role.id, str) else role.id
             union_role = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role_id)
             if not union_role:
-                await interaction.response.send_message(f"❌ `{role.name}` is not a registered union role.", ephemeral=True)
+                await interaction.response.send_message(f"❌ `{role.name}` is not a registered union role.")
                 return
             
             # If not Admin/Mod, check if they're a union leader for this specific role
@@ -298,7 +298,7 @@ class UnionCommands(commands.Cog):
                 leader_id = int(interaction.user.id) if isinstance(interaction.user.id, str) else interaction.user.id
                 leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", leader_id, role_id)
                 if not leader:
-                    await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.", ephemeral=True)
+                    await interaction.response.send_message(f"❌ You are not a leader of `{role.name}` union and don't have override permissions.")
                     return
             
             # Remove user from union (set union_role_id to NULL)
@@ -309,7 +309,50 @@ class UnionCommands(commands.Cog):
         
         await user.remove_roles(role)
         permission_note = " (Admin/Mod override)" if has_override_permission else ""
-        await interaction.response.send_message(f"✅ {user.mention} removed from union `{role.name}`{permission_note}.", ephemeral=True)
+        await interaction.response.send_message(f"✅ {user.mention} removed from union `{role.name}`{permission_note}.")
+
+    # /show_union_leader
+    @app_commands.command(name="show_union_leader", description="Show all union leaders and their assigned unions")
+    async def show_union_leader(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        conn = await get_connection()
+        try:
+            # Get all union leaders with their role assignments
+            leaders = await conn.fetch("SELECT user_id, role_id FROM union_leaders ORDER BY role_id")
+        finally:
+            await conn.close()
+
+        if not leaders:
+            await interaction.response.send_message("👑 No union leaders found.")
+            return
+
+        lines = ["👑 **Union Leaders:**", ""]
+        
+        for leader in leaders:
+            user_id = leader['user_id']
+            role_id = leader['role_id']
+            
+            # Get the Discord member
+            discord_member = guild.get_member(user_id)
+            if discord_member:
+                display_name = discord_member.display_name
+                username = discord_member.name
+                user_display = f"{display_name} ({username})"
+            else:
+                # Fallback if member not found in guild
+                user_display = f"Unknown User (ID: {user_id})"
+            
+            # Get the union role
+            role = guild.get_role(role_id)
+            if role:
+                role_name = role.name
+            else:
+                role_name = f"Unknown Role (ID: {role_id})"
+            
+            lines.append(f"• **{user_display}** → `{role_name}`")
+
+        message = "\n".join(lines)
+        await interaction.response.send_message(message)
 
     # /show_union_detail
     @app_commands.command(name="show_union_detail", description="Show all registered union roles with member lists")
@@ -320,12 +363,22 @@ class UnionCommands(commands.Cog):
             unions = await conn.fetch("SELECT role_id FROM union_roles")
             # Get all users with their union roles, usernames, and IGNs
             members = await conn.fetch("SELECT union_role_id, username, user_id, ign FROM users WHERE union_role_id IS NOT NULL ORDER BY username")
+            # Get all union leaders
+            leaders = await conn.fetch("SELECT user_id, role_id FROM union_leaders")
         finally:
             await conn.close()
 
         if not unions:
             await interaction.response.send_message("📭 No unions found.")
             return
+
+        # Create a set of leader user_ids for each role for quick lookup
+        leader_map = {}
+        for leader in leaders:
+            role_id = str(leader['role_id'])  # Convert to string to match union_role_id format
+            if role_id not in leader_map:
+                leader_map[role_id] = set()
+            leader_map[role_id].add(leader['user_id'])
 
         # Group members by union role
         union_members = {}
@@ -355,8 +408,12 @@ class UnionCommands(commands.Cog):
                             # Fallback to stored username if member not found in guild
                             display_name = member['username']
                         
+                        # Check if this user is a leader of this union
+                        is_leader = str(rid) in leader_map and member['user_id'] in leader_map[str(rid)]
+                        crown_emoji = " 👑" if is_leader else ""
+                        
                         ign = member['ign'] or "No IGN"
-                        lines.append(f"  • **{display_name}** | IGN: `{ign}`")
+                        lines.append(f"  • **{display_name}**{crown_emoji} | IGN: `{ign}`")
                 else:
                     lines.append("  • No members")
                 
