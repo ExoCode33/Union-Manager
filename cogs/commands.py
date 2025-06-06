@@ -251,7 +251,7 @@ class UnionCommands(commands.Cog):
             user_id = int(user.id) if isinstance(user.id, str) else user.id
             await conn.execute(
                 "INSERT INTO users (username, user_id, union_role_id) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET username = $1, union_role_id = $3",
-                user.name, user_id, role_id
+                user.name, user_id, str(role_id)
             )
         finally:
             await conn.close()
@@ -332,7 +332,8 @@ class UnionCommands(commands.Cog):
             rid = row['role_id']  # This is already an integer from DB
             role = guild.get_role(rid)  # Use directly, no int() conversion needed
             if role:
-                lines.append(f"{role.mention} — {count_map.get(rid, 0)}/30 members")
+                # Convert rid to string for comparison with count_map keys (since union_role_id is stored as string)
+                lines.append(f"{role.mention} — {count_map.get(str(rid), 0)}/30 members")
 
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
