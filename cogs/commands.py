@@ -138,9 +138,11 @@ class UnionCommands(commands.Cog):
     async def register_union_role(self, interaction: discord.Interaction, role: discord.Role):
         conn = await get_connection()
         try:
+            # Ensure role.id is treated as an integer
+            role_id = int(role.id) if isinstance(role.id, str) else role.id
             await conn.execute(
                 "INSERT INTO union_roles (role_id) VALUES ($1) ON CONFLICT (role_id) DO NOTHING",
-                str(role.id)
+                role_id
             )
         finally:
             await conn.close()
@@ -153,7 +155,8 @@ class UnionCommands(commands.Cog):
     async def deregister_union_role(self, interaction: discord.Interaction, role: discord.Role):
         conn = await get_connection()
         try:
-            await conn.execute("DELETE FROM union_roles WHERE role_id = $1", str(role.id))
+            role_id = int(role.id) if isinstance(role.id, str) else role.id
+            await conn.execute("DELETE FROM union_roles WHERE role_id = $1", role_id)
         finally:
             await conn.close()
         
@@ -165,9 +168,11 @@ class UnionCommands(commands.Cog):
     async def appoint_union_leader(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
         conn = await get_connection()
         try:
+            user_id = int(user.id) if isinstance(user.id, str) else user.id
+            role_id = int(role.id) if isinstance(role.id, str) else role.id
             await conn.execute(
                 "INSERT INTO union_leaders (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET role_id = $2",
-                str(user.id), str(role.id)
+                user_id, role_id
             )
         finally:
             await conn.close()
@@ -180,7 +185,8 @@ class UnionCommands(commands.Cog):
     async def dismiss_union_leader(self, interaction: discord.Interaction, user: discord.Member):
         conn = await get_connection()
         try:
-            await conn.execute("DELETE FROM union_leaders WHERE user_id = $1", str(user.id))
+            user_id = int(user.id) if isinstance(user.id, str) else user.id
+            await conn.execute("DELETE FROM union_leaders WHERE user_id = $1", user_id)
         finally:
             await conn.close()
         
@@ -190,7 +196,7 @@ class UnionCommands(commands.Cog):
     @app_commands.command(name="add_user_to_union", description="Add a user to your union")
     @app_commands.describe(user="User to add to your union")
     async def add_user_to_union(self, interaction: discord.Interaction, user: discord.Member):
-        leader_id = str(interaction.user.id)
+        leader_id = interaction.user.id  # Fixed: Use ID directly as integer
         conn = await get_connection()
         try:
             leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1", leader_id)
@@ -206,25 +212,25 @@ class UnionCommands(commands.Cog):
         finally:
             await conn.close()
         
-        await user.add_roles(discord.Object(id=int(leader['role_id'])))
+        await user.add_roles(discord.Object(id=leader['role_id']))  # role_id from DB is already integer
         await interaction.response.send_message(f"✅ {user.mention} added to your union.", ephemeral=True)
 
     # /remove_user_from_union
     @app_commands.command(name="remove_user_from_union", description="Remove a user from your union")
     @app_commands.describe(user="User to remove from your union")
     async def remove_user_from_union(self, interaction: discord.Interaction, user: discord.Member):
-        leader_id = str(interaction.user.id)
+        leader_id = interaction.user.id  # Fixed: Use ID directly as integer
         conn = await get_connection()
         try:
             leader = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1", leader_id)
             if not leader:
                 await interaction.response.send_message("❌ You are not a union leader.", ephemeral=True)
                 return
-            await conn.execute("UPDATE users SET union_role_id = NULL WHERE user_id = $1", str(user.id))
+            await conn.execute("UPDATE users SET union_role_id = NULL WHERE user_id = $1", user.id)  # Fixed: Use user.id directly
         finally:
             await conn.close()
         
-        await user.remove_roles(discord.Object(id=int(leader['role_id'])))
+        await user.remove_roles(discord.Object(id=leader['role_id']))  # role_id from DB is already integer
         await interaction.response.send_message(f"✅ {user.mention} removed from your union.", ephemeral=True)
 
     # /show_union_detail
@@ -245,8 +251,8 @@ class UnionCommands(commands.Cog):
 
         lines = []
         for row in unions:
-            rid = row['role_id']
-            role = guild.get_role(int(rid))
+            rid = row['role_id']  # This is already an integer from DB
+            role = guild.get_role(rid)  # Use directly, no int() conversion needed
             if role:
                 lines.append(f"{role.mention} — {count_map.get(rid, 0)}/30 members")
 
