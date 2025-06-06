@@ -208,8 +208,25 @@ class UnionCommands(commands.Cog):
 
     # /add_user_to_union
     @app_commands.command(name="add_user_to_union", description="Add a user to a union")
-    @app_commands.describe(user="User to add to the union", role="The union role to add them to")
-    async def add_user_to_union(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
+    @app_commands.describe(username="The Discord username of the user to add", role="The union role to add them to")
+    @app_commands.autocomplete(username=username_autocomplete)
+    async def add_user_to_union(self, interaction: discord.Interaction, username: str, role: discord.Role):
+        # Find the user by username
+        user = self.find_user_by_name(interaction.guild, username)
+        
+        if not user:
+            # If not found by name, try to parse as ID/mention
+            try:
+                user_id = self.extract_user_id(username)
+                try:
+                    user = await interaction.guild.fetch_member(user_id)
+                except:
+                    await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                    return
+            except ValueError:
+                await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                return
+        
         # Check permissions: Must be Admin/Mod OR union leader of the specified role
         has_override_permission = self.has_admin_or_mod_permissions(interaction.user)
         
@@ -245,8 +262,25 @@ class UnionCommands(commands.Cog):
 
     # /remove_user_from_union
     @app_commands.command(name="remove_user_from_union", description="Remove a user from a union")
-    @app_commands.describe(user="User to remove from the union", role="The union role to remove them from")
-    async def remove_user_from_union(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
+    @app_commands.describe(username="The Discord username of the user to remove", role="The union role to remove them from")
+    @app_commands.autocomplete(username=username_autocomplete)
+    async def remove_user_from_union(self, interaction: discord.Interaction, username: str, role: discord.Role):
+        # Find the user by username
+        user = self.find_user_by_name(interaction.guild, username)
+        
+        if not user:
+            # If not found by name, try to parse as ID/mention
+            try:
+                user_id = self.extract_user_id(username)
+                try:
+                    user = await interaction.guild.fetch_member(user_id)
+                except:
+                    await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                    return
+            except ValueError:
+                await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                return
+        
         # Check permissions: Must be Admin/Mod OR union leader of the specified role
         has_override_permission = self.has_admin_or_mod_permissions(interaction.user)
         
