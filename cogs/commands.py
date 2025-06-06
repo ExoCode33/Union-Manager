@@ -1,128 +1,142 @@
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 from utils.db import get_connection
 
-class UnionManager(commands.Cog):
+class UnionCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     async def get_user_union(self, user_id):
         conn = await get_connection()
-        async with conn.transaction():
-            user = await conn.fetchrow("SELECT * FROM union_members WHERE discord_id = $1", str(user_id))
-        await conn.close()
-        return user
+        try:
+            result = await conn.fetchrow("SELECT union_name FROM users WHERE discord_id = $1", str(user_id))
+            return result["union_name"] if result else None
+        finally:
+            await conn.close()
 
-    @app_commands.command(name="register_ign", description="Register your in-game name (IGN)")
-    async def register_ign(self, interaction: discord.Interaction, ign: str):
+    @app_commands.command(name="add_user_to_union", description="Add a user to your union")
+    async def add_user_to_union(self, interaction: discord.Interaction, user: discord.Member):
+        union = await self.get_user_union(interaction.user.id)
+        if not union:
+            await interaction.response.send_message("❌ You are not part of a union.", ephemeral=True)
+            return
+
         conn = await get_connection()
-        async with conn.transaction():
+        try:
             await conn.execute(
-                "INSERT INTO union_members (discord_id, ign) VALUES ($1, $2) ON CONFLICT (discord_id) DO UPDATE SET ign = $2",
-                str(interaction.user.id), ign
+                "INSERT INTO users (discord_id, union_name) VALUES ($1, $2) "
+                "ON CONFLICT (discord_id) DO UPDATE SET union_name = EXCLUDED.union_name",
+                str(user.id), union
             )
-        await conn.close()
-        await interaction.response.send_message(f"✅ {interaction.user.mention}'s IGN has been registered as `{ign}`.")
+        finally:
+            await conn.close()
+        await interaction.response.send_message(f"✅ {user.mention} has been added to union `{union}`.")
 
-    @app_commands.command(name="register_role_as_union", description="Register a Discord role as a union")
+    @app_commands.command(name="remove_user_from_union", description="Remove a user from your union")
+    async def remove_user_from_union(self, interaction: discord.Interaction, user: discord.Member):
+        union = await self.get_user_union(interaction.user.id)
+        if not union:
+            await interaction.response.send_message("❌ You are not part of a union.", ephemeral=True)
+            return
+
+        conn = await get_connection()
+        try:
+            result = await conn.execute(
+                "UPDATE users SET union_name = NULL WHERE discord_id = $1 AND union_name = $2",
+                str(user.id), union
+            )
+        finally:
+            await conn.close()
+        await interaction.response.send_message(f"✅ {user.mention} has been removed from your union.")
+
+    @app_commands.command(name="register_role_as_union", description="Register a role as a union")
     async def register_role_as_union(self, interaction: discord.Interaction, role: discord.Role):
         conn = await get_connection()
-        async with conn.transaction():
-            await conn.execute(
-                "INSERT INTO unions (role_id, name) VALUES ($1, $2) ON CONFLICT (role_id) DO NOTHING",
-                str(role.id), role.name
-            )
-        await conn.close()
-        await interaction.response.send_message(f"✅ `{role.name}` has been registered as a union.")
+        try:
+            await conn.execute("INSERT INTO unions (role_id) VALUES ($1) ON CONFLICT DO NOTHING", str(role.id))
+        finally:
+            await conn.close()
+        await interaction.response.send_message(f"✅ {role.mention} has been registered as a union.")
 
-    @app_commands.command(name="deregister_role_as_union", description="Remove a union registration from a role")
+    @app_commands.command(name="deregister_role_as_union", description="Deregister a union role")
     async def deregister_role_as_union(self, interaction: discord.Interaction, role: discord.Role):
         conn = await get_connection()
-        async with conn.transaction():
+        try:
             await conn.execute("DELETE FROM unions WHERE role_id = $1", str(role.id))
-        await conn.close()
-        await interaction.response.send_message(f"❌ `{role.name}` is no longer registered as a union.")
+        finally:
+            await conn.close()
+        await interaction.response.send_message(f"✅ {role.mention} has been deregistered.")
 
-    @app_commands.command(name="appoint_union_leader", description="Appoint a member as the union leader")
-    async def appoint_union_leader(self, interaction: discord.Interaction, member: discord.Member):
+    @app_commands.command(name="appoint_union_leader", description="Appoint a union leader")
+    async def appoint_union_leader(self, interaction: discord.Interaction, user: discord.Member):
         conn = await get_connection()
-        async with conn.transaction():
+        try:
             await conn.execute(
-                "UPDATE union_members SET is_leader = TRUE WHERE discord_id = $1",
-                str(member.id)
+                "INSERT INTO union_leaders (discord_id) VALUES ($1) ON CONFLICT DO NOTHING",
+                str(user.id)
             )
-        await conn.close()
-        await interaction.response.send_message(f"👑 `{member.display_name}` has been appointed as a union leader.")
+        finally:
+            await conn.close()
+        await interaction.response.send_message(f"✅ {user.mention} is now a union leader.")
 
-    @app_commands.command(name="dismiss_union_leader", description="Dismiss a member from union leadership")
-    async def dismiss_union_leader(self, interaction: discord.Interaction, member: discord.Member):
+    @app_commands.command(name="dismiss_union_leader", description="Dismiss a union leader")
+    async def dismiss_union_leader(self, interaction: discord.Interaction, user: discord.Member):
         conn = await get_connection()
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE union_members SET is_leader = FALSE WHERE discord_id = $1",
-                str(member.id)
-            )
-        await conn.close()
-        await interaction.response.send_message(f"⚠️ `{member.display_name}` has been dismissed from union leadership.")
+        try:
+            await conn.execute("DELETE FROM union_leaders WHERE discord_id = $1", str(user.id))
+        finally:
+            await conn.close()
+        await interaction.response.send_message(f"✅ {user.mention} is no longer a union leader.")
 
-    @app_commands.command(name="add_user_to_union", description="Assign a user to a union")
-    async def add_user_to_union(self, interaction: discord.Interaction, member: discord.Member, role: discord.Role):
+    @app_commands.command(name="register_ign", description="Register your in-game name")
+    async def register_ign(self, interaction: discord.Interaction, ign: str):
         conn = await get_connection()
-        async with conn.transaction():
+        try:
             await conn.execute(
-                "UPDATE union_members SET union_name = $1 WHERE discord_id = $2",
-                role.name, str(member.id)
+                "INSERT INTO users (discord_id, ign) VALUES ($1, $2) "
+                "ON CONFLICT (discord_id) DO UPDATE SET ign = EXCLUDED.ign",
+                str(interaction.user.id), ign
             )
-        await conn.close()
-        await interaction.response.send_message(f"📦 `{member.display_name}` has been added to the union `{role.name}`.")
+        finally:
+            await conn.close()
+        await interaction.response.send_message(f"✅ IGN `{ign}` registered.")
 
-    @app_commands.command(name="remove_user_from_union", description="Remove a user from their union")
-    async def remove_user_from_union(self, interaction: discord.Interaction, member: discord.Member):
+    @app_commands.command(name="search_user", description="Search a user by IGN or Discord name")
+    async def search_user(self, interaction: discord.Interaction, query: str):
         conn = await get_connection()
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE union_members SET union_name = NULL WHERE discord_id = $1",
-                str(member.id)
+        try:
+            result = await conn.fetchrow(
+                "SELECT ign, union_name FROM users WHERE ign ILIKE $1 OR discord_id = $2",
+                f"%{query}%", str(interaction.user.id)
             )
-        await conn.close()
-        await interaction.response.send_message(f"📤 `{member.display_name}` has been removed from their union.")
+        finally:
+            await conn.close()
 
-    @app_commands.command(name="search_user", description="Search a user's union membership")
-    async def search_user(self, interaction: discord.Interaction, user: discord.User):
-        user_union = await self.get_user_union(user.id)
-        if not user_union:
-            await interaction.response.send_message("❌ No data found for this user.")
-            return
+        if result:
+            await interaction.response.send_message(
+                f"📌 **User Info**\n"
+                f"**Discord:** {interaction.user.mention}\n"
+                f"**IGN:** {result['ign']}\n"
+                f"**Union:** {result['union_name'] or 'None'}"
+            )
+        else:
+            await interaction.response.send_message("❌ User not found.")
 
-        message = (
-            f"**Discord:** {interaction.user.mention}
-"
-            f"**IGN:** `{user_union['ign']}`
-"
-            f"**Union:** `{user_union['union_name']}`
-"
-            f"**Leader:** {'✅' if user_union['is_leader'] else '❌'}"
-        )
-        await interaction.response.send_message(message)
-
-    @app_commands.command(name="show_union_detail", description="Show details for all registered unions")
+    @app_commands.command(name="show_union_detail", description="List all registered union roles")
     async def show_union_detail(self, interaction: discord.Interaction):
         conn = await get_connection()
-        async with conn.transaction():
-            rows = await conn.fetch("SELECT * FROM unions")
-        await conn.close()
+        try:
+            rows = await conn.fetch("SELECT role_id FROM unions")
+        finally:
+            await conn.close()
 
-        if not rows:
-            await interaction.response.send_message("ℹ️ No unions registered.")
-            return
+        if rows:
+            mentions = [f"<@&{row['role_id']}>" for row in rows]
+            await interaction.response.send_message("📋 **Registered Unions:**\n" + "\n".join(mentions))
+        else:
+            await interaction.response.send_message("❌ No unions registered.")
 
-        message = "📋 **Registered Unions:**
-" + "
-".join(
-            f"- {r['name']} (Role ID: {r['role_id']})" for r in rows
-        )
-        await interaction.response.send_message(message)
-
-async def setup(bot: commands.Bot):
-    await bot.add_cog(UnionManager(bot))
+async def setup(bot):
+    await bot.add_cog(UnionCommands(bot))
