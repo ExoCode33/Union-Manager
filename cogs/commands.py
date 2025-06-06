@@ -28,8 +28,7 @@ class UnionCommands(commands.Cog):
             user = await conn.fetchrow("SELECT ign FROM users WHERE discord_id = $1", user_id)
 
         if user:
-await interaction.response.send_message(f"**Discord:** <@{discord_id}>")
-**IGN:** `{user['ign']}`", ephemeral=True)
+            await interaction.response.send_message(f"**Discord:** <@{discord_id}>\n**IGN:** `{user['ign']}`", ephemeral=True)
         else:
             await interaction.response.send_message("⚠️ No IGN found for this user.", ephemeral=True)
 
@@ -105,7 +104,7 @@ await interaction.response.send_message(f"**Discord:** <@{discord_id}>")
         guild = interaction.guild
         async with await get_connection() as conn:
             unions = await conn.fetch("SELECT role_id, name FROM unions")
-            members = await conn.fetch("SELECT role_id, COUNT(*) FROM users GROUP BY role_id")
+            members = await conn.fetch("SELECT role_id, COUNT(*) FROM users WHERE role_id IS NOT NULL GROUP BY role_id")
 
         count_map = {row['role_id']: row['count'] for row in members}
         if not unions:
@@ -119,8 +118,7 @@ await interaction.response.send_message(f"**Discord:** <@{discord_id}>")
             if role:
                 lines.append(f"{role.mention} — {count_map.get(rid, 0)}/30 members")
 
-        await interaction.response.send_message("
-".join(lines), ephemeral=True)
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
