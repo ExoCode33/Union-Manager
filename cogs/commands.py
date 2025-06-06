@@ -1,101 +1,82 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import sqlite3
-import os
 from utils.permissions import is_manager
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "..", "database.db")
-
-def can_manage_union(user: discord.Member, target_union: str) -> bool:
-    if is_manager(user):
-        return True
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT role_name FROM union_leaders WHERE leader_id = ?", (str(user.id),))
-        result = cursor.fetchone()
-        conn.close()
-        return result and result[0].lower() == target_union.lower()
-    except Exception as e:
-        print(f"Permission check error: {e}")
-        return False
+from utils.db import get_connection
 
 class BotCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def get_user_union(self, user_id: int):
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT union_name FROM users WHERE discord_id = ?", (str(user_id),))
-        result = cursor.fetchone()
-        conn.close()
-        return result[0] if result else None
+    async def get_user_union(self, user_id: int):
+        async with await get_connection() as conn:
+            row = await conn.fetchrow("SELECT union_name FROM users WHERE discord_id = $1", str(user_id))
+            return row["union_name"] if row else None
+
+    def is_leader_of(self, user_id: str, target_union: str, leaders):
+        for row in leaders:
+            if row["leader_id"] == user_id and row["role_name"].lower() == target_union.lower():
+                return True
+        return False
 
     @app_commands.command(name="register_ign", description="Register a user's IGN")
     @app_commands.describe(user="The user", ign="In-game name")
     async def register_ign(self, interaction: discord.Interaction, user: discord.Member, ign: str):
-        if not is_manager(interaction.user) and not can_manage_union(interaction.user, self.get_user_union(user.id)):
+        user_union = await self.get_user_union(user.id)
+        if not is_manager(interaction.user) and not await self.can_manage(interaction.user.id, user_union):
             await interaction.response.send_message("❌ You can't register IGN for this user.", ephemeral=True)
             return
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO users (discord_id, ign) VALUES (?, ?)", (str(user.id), ign))
-        cursor.execute("UPDATE users SET ign = ? WHERE discord_id = ?", (ign, str(user.id)))
-        conn.commit()
-        conn.close()
+        async with await get_connection() as conn:
+            await conn.execute(
+                "INSERT INTO users (discord_id, ign, union_name) VALUES ($1, $2, $3) ON CONFLICT (discord_id) DO UPDATE SET ign = $2",
+                str(user.id), ign, user_union)
         await interaction.response.send_message(f"✅ {user.mention}'s IGN has been registered as `{ign}`.")
 
     @app_commands.command(name="unregister_ign", description="Remove a user's IGN")
     @app_commands.describe(user="The user")
     async def unregister_ign(self, interaction: discord.Interaction, user: discord.Member):
-        if not is_manager(interaction.user) and not can_manage_union(interaction.user, self.get_user_union(user.id)):
+        user_union = await self.get_user_union(user.id)
+        if not is_manager(interaction.user) and not await self.can_manage(interaction.user.id, user_union):
             await interaction.response.send_message("❌ You can't unregister IGN for this user.", ephemeral=True)
             return
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET ign = NULL WHERE discord_id = ?", (str(user.id),))
-        conn.commit()
-        conn.close()
+        async with await get_connection() as conn:
+            await conn.execute("UPDATE users SET ign = NULL WHERE discord_id = $1", str(user.id))
         await interaction.response.send_message(f"✅ IGN removed for {user.mention}.")
 
     @app_commands.command(name="set_union", description="Assign a user to a union")
     @app_commands.describe(user="The user", role="Union role")
     async def set_union(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
-        role_name = role.name
-        if not is_manager(interaction.user) and not can_manage_union(interaction.user, role_name):
+        if not is_manager(interaction.user) and not await self.can_manage(interaction.user.id, role.name):
             await interaction.response.send_message("❌ You can't assign this user to that union.", ephemeral=True)
             return
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO users (discord_id, ign, union_name) VALUES (?, '', ?)", (str(user.id), role_name))
-        cursor.execute("UPDATE users SET union_name = ? WHERE discord_id = ?", (role_name, str(user.id)))
-        conn.commit()
-        conn.close()
-        await user.add_roles(role)
-        await interaction.response.send_message(f"✅ {user.mention} assigned to **{role_name}**.")
+        async with await get_connection() as conn:
+            await conn.execute(
+                "INSERT INTO users (discord_id, ign, union_name) VALUES ($1, '', $2) ON CONFLICT (discord_id) DO UPDATE SET union_name = $2",
+                str(user.id), role.name)
+        try:
+            await user.add_roles(role)
+        except discord.Forbidden:
+            await interaction.followup.send("⚠️ Could not assign the role. Check bot permissions.", ephemeral=True)
+        await interaction.response.send_message(f"✅ {user.mention} assigned to **{role.name}**.")
 
     @app_commands.command(name="unset_union", description="Remove a user from their union")
     @app_commands.describe(user="The user to remove")
     async def unset_union(self, interaction: discord.Interaction, user: discord.Member):
-        union_name = self.get_user_union(user.id)
+        union_name = await self.get_user_union(user.id)
         if not union_name:
             await interaction.response.send_message("ℹ️ User is not assigned to any union.", ephemeral=True)
             return
-        if not is_manager(interaction.user) and not can_manage_union(interaction.user, union_name):
+        if not is_manager(interaction.user) and not await self.can_manage(interaction.user.id, union_name):
             await interaction.response.send_message("❌ You can't remove this user from their union.", ephemeral=True)
             return
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET union_name = NULL WHERE discord_id = ?", (str(user.id),))
-        conn.commit()
-        conn.close()
-
+        async with await get_connection() as conn:
+            await conn.execute("UPDATE users SET union_name = NULL WHERE discord_id = $1", str(user.id))
         role = discord.utils.get(interaction.guild.roles, name=union_name)
         if role:
-            await user.remove_roles(role)
+            try:
+                await user.remove_roles(role)
+            except discord.Forbidden:
+                await interaction.followup.send("⚠️ Could not remove the role. Check bot permissions.", ephemeral=True)
         await interaction.response.send_message(f"✅ {user.mention} removed from **{union_name}**.")
 
     @app_commands.command(name="register_union_role", description="Register a role as a union")
@@ -104,12 +85,11 @@ class BotCommands(commands.Cog):
         if not is_manager(interaction.user):
             await interaction.response.send_message("❌ Only Admin or Mod can register union roles.", ephemeral=True)
             return
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO union_roles (role_name) VALUES (?)", (role.name,))
-        conn.commit()
-        conn.close()
+        async with await get_connection() as conn:
+            await conn.execute("INSERT INTO union_roles (role_name) VALUES ($1) ON CONFLICT DO NOTHING", role.name)
         await interaction.response.send_message(f"✅ Union role **{role.name}** registered.")
+
+    
 
     @app_commands.command(name="deregister_union_role", description="Remove a registered union role")
     @app_commands.describe(role_name="Union role name")
@@ -117,11 +97,8 @@ class BotCommands(commands.Cog):
         if not is_manager(interaction.user):
             await interaction.response.send_message("❌ Only Admin or Mod can deregister union roles.", ephemeral=True)
             return
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM union_roles WHERE role_name = ?", (role_name,))
-        conn.commit()
-        conn.close()
+        async with await get_connection() as conn:
+            await conn.execute("DELETE FROM union_roles WHERE role_name = $1", role_name)
         await interaction.response.send_message(f"🗑️ Union role **{role_name}** has been removed.")
 
     @app_commands.command(name="appoint_union_leader", description="Assign a leader to a union role")
@@ -130,11 +107,10 @@ class BotCommands(commands.Cog):
         if not is_manager(interaction.user):
             await interaction.response.send_message("❌ Only Admin or Mod can appoint union leaders.", ephemeral=True)
             return
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO union_leaders (role_name, leader_id) VALUES (?, ?)", (role.name, str(user.id)))
-        conn.commit()
-        conn.close()
+        async with await get_connection() as conn:
+            await conn.execute(
+                "INSERT INTO union_leaders (role_name, leader_id) VALUES ($1, $2) ON CONFLICT (role_name) DO UPDATE SET leader_id = EXCLUDED.leader_id",
+                role.name, str(user.id))
         await interaction.response.send_message(f"👑 {user.mention} is now the leader of **{role.name}**.")
 
     @app_commands.command(name="dismiss_union_leader", description="Remove the leader of a union")
@@ -143,76 +119,87 @@ class BotCommands(commands.Cog):
         if not is_manager(interaction.user):
             await interaction.response.send_message("❌ Only Admin or Mod can dismiss union leaders.", ephemeral=True)
             return
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM union_leaders WHERE role_name = ?", (role_name,))
-        conn.commit()
-        conn.close()
+        async with await get_connection() as conn:
+            await conn.execute("DELETE FROM union_leaders WHERE role_name = $1", role_name)
         await interaction.response.send_message(f"✅ Leader for union **{role_name}** dismissed.")
+
+    @app_commands.command(name="show_user", description="Show a user's IGN and union")
+    @app_commands.describe(user="The user")
+    async def show_user(self, interaction: discord.Interaction, user: discord.Member):
+        async with await get_connection() as conn:
+            row = await conn.fetchrow("SELECT ign, union_name FROM users WHERE discord_id = $1", str(user.id))
+        if not row:
+            await interaction.response.send_message("❌ User not found.")
+        else:
+            ign = row["ign"] or "-"
+            union = row["union_name"] or "-"
+            await interaction.response.send_message(f"🧾 {user.mention} → IGN: `{ign}`, Union: `{union}`")
 
     @app_commands.command(name="list_union_roles", description="List all registered union roles with member count")
     @app_commands.describe(show_members="Show members and their IGN")
     async def list_union_roles(self, interaction: discord.Interaction, show_members: bool = False):
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("SELECT role_name FROM union_roles")
-            all_roles = [row[0] for row in cursor.fetchall()]
-            cursor.execute("SELECT union_name, COUNT(*) FROM users WHERE union_name IS NOT NULL GROUP BY union_name")
-            counts = {row[0]: row[1] for row in cursor.fetchall()}
-            members_by_union = {}
-            if show_members:
-                cursor.execute("SELECT discord_id, ign, union_name FROM users WHERE union_name IS NOT NULL")
-                for discord_id, ign, union_name in cursor.fetchall():
-                    if union_name not in members_by_union:
-                        members_by_union[union_name] = []
-                    members_by_union[union_name].append((discord_id, ign))
-            conn.close()
+            async with await get_connection() as conn:
+                all_roles = await conn.fetch("SELECT role_name FROM union_roles")
+                counts = await conn.fetch("SELECT union_name, COUNT(*) FROM users WHERE union_name IS NOT NULL GROUP BY union_name")
+                members_by_union = {}
+                if show_members:
+                    members = await conn.fetch("SELECT discord_id, ign, union_name FROM users WHERE union_name IS NOT NULL")
+                    for row in members:
+                        members_by_union.setdefault(row["union_name"], []).append((row["discord_id"], row["ign"]))
+
             if not all_roles:
                 await interaction.response.send_message("📭 No union roles registered.")
                 return
             lines = []
-            for role in all_roles:
-                count = counts.get(role, 0)
+            count_map = {r["union_name"]: r["count"] for r in counts}
+            for r in all_roles:
+                role = r["role_name"]
+                count = count_map.get(role, 0)
                 status = "✅" if count >= 30 else ""
                 lines.append(f"📋 **{role}** — {count}/30 members {status}")
                 if show_members and role in members_by_union:
-                    for member_id, ign in members_by_union[role]:
-                        ign_display = ign if ign else "-"
-                        lines.append(f"• <@{member_id}> — IGN: `{ign_display}`")
+                    for discord_id, ign in members_by_union[role]:
+                        ign_display = ign or "-"
+                        lines.append(f"• <@{discord_id}> — IGN: `{ign_display}`")
             await interaction.response.send_message("\n".join(lines))
         except Exception as e:
-            print(f"DB ERROR: {e}")
+            print("ERROR:", e)
             await interaction.response.send_message("⚠️ Failed to list union roles.", ephemeral=True)
-
-    @app_commands.command(name="show_user", description="Show a user's IGN and union")
-    @app_commands.describe(user="The user")
-    async def show_user(self, interaction: discord.Interaction, user: discord.Member):
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT ign, union_name FROM users WHERE discord_id = ?", (str(user.id),))
-        result = cursor.fetchone()
-        conn.close()
-        if not result:
-            await interaction.response.send_message("❌ User not found.")
-        else:
-            ign, union = result
-            ign = ign if ign else "-"
-            union = union if union else "-"
-            await interaction.response.send_message(f"🧾 {user.mention} → IGN: `{ign}`, Union: `{union}`")
 
     @app_commands.command(name="list_union_leaders", description="List all union leaders")
     async def list_union_leaders(self, interaction: discord.Interaction):
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT role_name, leader_id FROM union_leaders")
-        rows = cursor.fetchall()
-        conn.close()
+        async with await get_connection() as conn:
+            rows = await conn.fetch("SELECT role_name, leader_id FROM union_leaders")
         if not rows:
             await interaction.response.send_message("📭 No union leaders assigned.")
             return
-        lines = [f"👑 **{role}** → <@{leader_id}>" for role, leader_id in rows]
+        lines = [f"👑 **{row['role_name']}** → <@{row['leader_id']}>" for row in rows]
         await interaction.response.send_message("\n".join(lines))
+
+    @app_commands.command(name="search_user", description="Search for a user by IGN or Discord name")
+    @app_commands.describe(query="IGN or part of Discord name")
+    async def search_user(self, interaction: discord.Interaction, query: str):
+        query = query.lower()
+        async with await get_connection() as conn:
+            all_users = await conn.fetch("SELECT discord_id, ign, union_name FROM users")
+        matched = []
+        for row in all_users:
+            member = interaction.guild.get_member(int(row["discord_id"]))
+            if (row["ign"] and query in row["ign"].lower()) or (member and query in member.display_name.lower()):
+                ign = row["ign"] or "-"
+                union = row["union_name"] or "-"
+                matched.append(f"🔍 {member.mention if member else row['discord_id']} → IGN: `{ign}`, Union: `{union}`")
+        if matched:
+            await interaction.response.send_message("\n".join(matched[:10]))
+        else:
+            await interaction.response.send_message("🔎 No matching users found.")
+
+
+    async def can_manage(self, user_id, union_name):
+        async with await get_connection() as conn:
+            rows = await conn.fetch("SELECT * FROM union_leaders")
+        return self.is_leader_of(str(user_id), union_name, rows)
 
 async def setup(bot):
     await bot.add_cog(BotCommands(bot))
