@@ -80,9 +80,10 @@ class UnionCommands(commands.Cog):
         
         conn = await get_connection()
         try:
+            # Insert or update user with both IGN and username
             await conn.execute(
-                "INSERT INTO users (user_id, ign) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET ign = $2",
-                user.id, ign
+                "INSERT INTO users (username, user_id, ign) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET username = $1, ign = $3",
+                user.name, user.id, ign
             )
         finally:
             await conn.close()
@@ -114,11 +115,19 @@ class UnionCommands(commands.Cog):
         
         conn = await get_connection()
         try:
-            user_data = await conn.fetchrow("SELECT ign FROM users WHERE user_id = $1", user.id)
+            user_data = await conn.fetchrow("SELECT username, ign FROM users WHERE user_id = $1", user.id)
         finally:
             await conn.close()
 
         if user_data:
+            # Update username if it's different (in case user changed their username)
+            if user_data['username'] != user.name:
+                conn = await get_connection()
+                try:
+                    await conn.execute("UPDATE users SET username = $1 WHERE user_id = $2", user.name, user.id)
+                finally:
+                    await conn.close()
+            
             await interaction.response.send_message(f"**Discord:** {user_display}\n**IGN:** `{user_data['ign']}`", ephemeral=True)
         else:
             await interaction.response.send_message(f"⚠️ No IGN found for **{user_display}**.", ephemeral=True)
@@ -188,7 +197,12 @@ class UnionCommands(commands.Cog):
             if not leader:
                 await interaction.response.send_message("❌ You are not a union leader.", ephemeral=True)
                 return
-            await conn.execute("UPDATE users SET union_role_id = $1 WHERE user_id = $2", leader['role_id'], str(user.id))
+            
+            # Insert or update user with union role and username
+            await conn.execute(
+                "INSERT INTO users (username, user_id, union_role_id) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET username = $1, union_role_id = $3",
+                user.name, user.id, leader['role_id']
+            )
         finally:
             await conn.close()
         
