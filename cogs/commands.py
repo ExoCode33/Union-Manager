@@ -7,6 +7,28 @@ class UnionCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
+    def find_user_by_name(self, guild: discord.Guild, username: str) -> discord.Member:
+        """Find a user in the guild by their username or display name"""
+        username_lower = username.lower()
+        
+        # First try exact match on username
+        for member in guild.members:
+            if member.name.lower() == username_lower:
+                return member
+        
+        # Then try exact match on display name
+        for member in guild.members:
+            if member.display_name.lower() == username_lower:
+                return member
+        
+        # Finally try partial match on either name
+        for member in guild.members:
+            if (username_lower in member.name.lower() or 
+                username_lower in member.display_name.lower()):
+                return member
+        
+        return None
+
     def extract_user_id(self, discord_id: str) -> int:
         """Extract user ID from Discord mention or plain ID string"""
         # Remove <@ and > from mentions, handle both <@123> and <@!123> formats
@@ -16,52 +38,60 @@ class UnionCommands(commands.Cog):
 
     # /register_ign
     @app_commands.command(name="register_ign", description="Register a user's IGN")
-    @app_commands.describe(discord_id="The Discord ID of the user", ign="The IGN to register")
-    async def register_ign(self, interaction: discord.Interaction, discord_id: str, ign: str):
-        try:
-            user_id = self.extract_user_id(discord_id)
-        except ValueError:
-            await interaction.response.send_message("❌ Invalid Discord ID format. Please provide a valid Discord ID or mention.", ephemeral=True)
-            return
+    @app_commands.describe(username="The Discord username of the user", ign="The IGN to register")
+    async def register_ign(self, interaction: discord.Interaction, username: str, ign: str):
+        # First try to find user by name
+        user = self.find_user_by_name(interaction.guild, username)
         
-        # Try to get the user object to display their name
-        try:
-            user = await self.bot.fetch_user(user_id)
-            user_display = f"{user.display_name} ({user.name})"
-        except:
-            # Fallback to mention if user can't be fetched
-            user_display = f"<@{user_id}>"
+        if not user:
+            # If not found by name, try to parse as ID/mention
+            try:
+                user_id = self.extract_user_id(username)
+                try:
+                    user = await interaction.guild.fetch_member(user_id)
+                except:
+                    await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                    return
+            except ValueError:
+                await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                return
+        
+        user_display = f"{user.display_name} ({user.name})"
         
         async with await get_connection() as conn:
             await conn.execute(
                 "INSERT INTO users (discord_id, ign) VALUES ($1, $2) ON CONFLICT (discord_id) DO UPDATE SET ign = $2",
-                user_id, ign
+                user.id, ign
             )
         await interaction.response.send_message(f"✅ IGN for **{user_display}** set to `{ign}`", ephemeral=True)
 
     # /search_user
-    @app_commands.command(name="search_user", description="Search for a user by Discord ID")
-    @app_commands.describe(discord_id="The Discord ID of the user to search")
-    async def search_user(self, interaction: discord.Interaction, discord_id: str):
-        try:
-            user_id = self.extract_user_id(discord_id)
-        except ValueError:
-            await interaction.response.send_message("❌ Invalid Discord ID format. Please provide a valid Discord ID or mention.", ephemeral=True)
-            return
+    @app_commands.command(name="search_user", description="Search for a user by Discord username")
+    @app_commands.describe(username="The Discord username of the user to search")
+    async def search_user(self, interaction: discord.Interaction, username: str):
+        # First try to find user by name
+        user = self.find_user_by_name(interaction.guild, username)
         
-        # Try to get the user object to display their name
-        try:
-            user_obj = await self.bot.fetch_user(user_id)
-            user_display = f"{user_obj.display_name} ({user_obj.name})"
-        except:
-            # Fallback to mention if user can't be fetched
-            user_display = f"<@{user_id}>"
+        if not user:
+            # If not found by name, try to parse as ID/mention
+            try:
+                user_id = self.extract_user_id(username)
+                try:
+                    user = await interaction.guild.fetch_member(user_id)
+                except:
+                    await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                    return
+            except ValueError:
+                await interaction.response.send_message(f"❌ User not found: `{username}`", ephemeral=True)
+                return
+        
+        user_display = f"{user.display_name} ({user.name})"
         
         async with await get_connection() as conn:
-            user = await conn.fetchrow("SELECT ign FROM users WHERE discord_id = $1", user_id)
+            user_data = await conn.fetchrow("SELECT ign FROM users WHERE discord_id = $1", user.id)
 
-        if user:
-            await interaction.response.send_message(f"**Discord:** {user_display}\n**IGN:** `{user['ign']}`", ephemeral=True)
+        if user_data:
+            await interaction.response.send_message(f"**Discord:** {user_display}\n**IGN:** `{user_data['ign']}`", ephemeral=True)
         else:
             await interaction.response.send_message(f"⚠️ No IGN found for **{user_display}**.", ephemeral=True)
 
