@@ -6,24 +6,32 @@ from utils.db import get_connection
 class UnionCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.union_role_ids = set()  # Cache for union role IDs
+        self.union_role_cache = {}  # Cache: {role_name: role_id}
         
     async def cog_load(self):
         """Load union roles when the cog is loaded"""
         await self.refresh_union_roles_cache()
     
     async def refresh_union_roles_cache(self):
-        """Refresh the cache of union role IDs"""
+        """Refresh the cache of union role names and IDs"""
         try:
             conn = await get_connection()
             try:
                 union_roles = await conn.fetch("SELECT role_id FROM union_roles")
-                self.union_role_ids = {row['role_id'] for row in union_roles}
+                self.union_role_cache = {}
+                
+                guild = self.bot.guilds[0] if self.bot.guilds else None  # Get first guild
+                if guild:
+                    for row in union_roles:
+                        role = guild.get_role(row['role_id'])
+                        if role:
+                            self.union_role_cache[role.name] = role.id
+                            
             finally:
                 await conn.close()
         except Exception as e:
             print(f"Error refreshing union roles cache: {e}")
-            self.union_role_ids = set()
+            self.union_role_cache = {}
     
     async def union_role_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         """Autocomplete for union role parameters - only shows registered union roles"""
