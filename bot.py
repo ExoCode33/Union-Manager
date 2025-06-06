@@ -34,9 +34,20 @@ async def on_ready():
     conn.commit()
     conn.close()
 
-    # ✅ Load bot commands
-    await bot.load_extension("cogs.commands")
-    print("✅ Loaded cogs.commands")
+    # ✅ Load all cog modules
+    cog_modules = [
+        "cogs.basic_commands",
+        "cogs.union_management", 
+        "cogs.union_membership",
+        "cogs.union_info"
+    ]
+    
+    for module in cog_modules:
+        try:
+            await bot.load_extension(module)
+            print(f"✅ Loaded {module}")
+        except Exception as e:
+            print(f"❌ Failed to load {module}: {e}")
 
     # ✅ GLOBAL slash command sync only (no `guild=`!)
     synced = await bot.tree.sync()
