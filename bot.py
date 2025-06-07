@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import os
+import traceback
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 intents = discord.Intents.all()
@@ -22,12 +23,46 @@ async def on_ready():
         try:
             await bot.load_extension(module)
             print(f"✅ Loaded {module}")
+            
+            # Check if commands were added to the tree
+            cog = bot.get_cog(module.split('.')[-1].replace('_', '').title().replace('Commands', 'Commands').replace('Management', 'Management').replace('Membership', 'Membership').replace('Info', 'Info'))
+            if not cog:
+                # Try different cog name patterns
+                possible_names = [
+                    'BasicCommands', 'UnionManagement', 'UnionMembership', 'UnionInfo',
+                    'Basic', 'Management', 'Membership', 'Info'
+                ]
+                for name in possible_names:
+                    cog = bot.get_cog(name)
+                    if cog:
+                        break
+            
+            if cog:
+                app_commands = cog.get_app_commands()
+                print(f"   📋 Found {len(app_commands)} app commands in {type(cog).__name__}")
+                for cmd in app_commands:
+                    print(f"      - {cmd.name}: {cmd.description}")
+            else:
+                print(f"   ⚠️ Could not find cog object for {module}")
+                
         except Exception as e:
             print(f"❌ Failed to load {module}: {e}")
+            traceback.print_exc()
+    
+    # Check total commands before sync
+    total_commands = len(bot.tree.get_commands())
+    print(f"🌳 Total commands in tree before sync: {total_commands}")
+    
+    # List all loaded cogs
+    print(f"📁 Loaded cogs: {list(bot.cogs.keys())}")
     
     # 🔄 Clear command cache AFTER loading cogs
     print("🔄 Clearing command cache...")
     bot.tree.clear_commands(guild=None)
+    
+    # Check commands after clearing
+    total_after_clear = len(bot.tree.get_commands())
+    print(f"🌳 Commands in tree after clear: {total_after_clear}")
     
     # 🔄 Sync commands
     print("🔄 Syncing commands...")
@@ -44,6 +79,7 @@ async def on_ready():
             
     except Exception as e:
         print(f"❌ Failed to sync commands: {e}")
+        traceback.print_exc()
     
     print(f"✅ Bot is ready. Logged in as {bot.user}")
 
@@ -116,5 +152,10 @@ async def debug_tree(ctx):
     print(f"📊 Total cog commands: {total_cog_commands}")
     
     await ctx.send(f"Debug info printed to console. Tree: {tree_commands}, Cogs: {total_cog_commands}")
+
+# Simple test command that doesn't use database
+@bot.tree.command(name="test_bot", description="Test if bot commands work")
+async def test_bot(interaction: discord.Interaction):
+    await interaction.response.send_message("🎉 Bot is working! Commands can be registered.", ephemeral=True)
 
 bot.run(TOKEN)
