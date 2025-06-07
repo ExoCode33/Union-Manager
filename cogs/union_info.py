@@ -14,8 +14,8 @@ class UnionInfo(commands.Cog):
             rows = await conn.fetch("""
                 SELECT ul.role_id, ul.user_id, u.ign_primary, u.ign_secondary
                 FROM union_leaders ul
-                JOIN union_roles ur ON ul.role_id = ur.role_id
-                LEFT JOIN users u ON ul.user_id = u.discord_id
+                JOIN union_roles ur ON ul.role_id::text = ur.role_id::text
+                LEFT JOIN users u ON ul.user_id::text = u.discord_id
                 ORDER BY ul.role_id
             """)
 
@@ -134,7 +134,7 @@ class UnionInfo(commands.Cog):
                             
                             leader_igns = await conn.fetchrow(
                                 "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
-                                leader_id
+                                str(leader_id)
                             )
                             if leader_igns and (leader_igns['ign_primary'] or leader_igns['ign_secondary']):
                                 ign_parts = []
@@ -201,7 +201,7 @@ class UnionInfo(commands.Cog):
                         
                         leader_igns = await conn.fetchrow(
                             "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
-                            leader_id
+                            str(leader_id)
                         )
                         ign_parts = []
                         if leader_igns:
