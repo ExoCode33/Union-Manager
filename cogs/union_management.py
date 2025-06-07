@@ -55,8 +55,9 @@ class UnionManagement(commands.Cog):
         conn = await get_connection()
         try:
             await conn.execute("DELETE FROM union_roles WHERE role_id = $1", role.id)
-            await conn.execute("DELETE FROM union_leaders WHERE role_id = $1", role.id)
+            await conn.execute("DELETE FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", role.id)
             await conn.execute("UPDATE users SET union_name = NULL WHERE union_name = $1", str(role.id))
+            await conn.execute("UPDATE users SET union_name_2 = NULL WHERE union_name_2 = $1", str(role.id))
             await interaction.response.send_message(f"✅ Union **{role.name}** deregistered and all members removed", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Error deregistering union role: {str(e)}", ephemeral=True)
@@ -74,7 +75,7 @@ class UnionManagement(commands.Cog):
         discord_id = await self.find_user_by_ign(ign)
         if not discord_id:
             await interaction.response.send_message(
-                f"❌ No Discord user found with IGN **{ign}**. They must register their IGN first using `/register_ign`.", 
+                f"❌ No Discord user found with IGN **{ign}**. They must register their IGN first using `/register_primary_ign` or `/register_secondary_ign`.", 
                 ephemeral=True
             )
             return
@@ -121,7 +122,6 @@ class UnionManagement(commands.Cog):
                 return
             
             ign_type = "Primary" if is_primary_ign else "Secondary"
-            target_column = "role_id" if is_primary_ign else "role_id_2"
             
             if existing_leadership:
                 current_role_primary = existing_leadership['role_id']
@@ -168,27 +168,49 @@ class UnionManagement(commands.Cog):
                 else:
                     await conn.execute("INSERT INTO union_leaders (user_id, role_id, role_id_2) VALUES ($1, NULL, $2)", int(discord_id), role.id)
 
-            # Appointment successful - now add them as a member automatically
-            # Determine which union slot to update based on IGN type
+            # 🔧 FIX: Properly add them as a member using the correct IGN slot
             if is_primary_ign:
                 # Primary IGN appointment - update union_name
                 await conn.execute("""
                     INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2)
-                    VALUES ($1, $2, $3, $4, $5, (SELECT union_name_2 FROM users WHERE discord_id = $1))
-                    ON CONFLICT (discord_id) DO UPDATE SET union_name = EXCLUDED.union_name
-                """, discord_id, user_display.split('(')[0].strip() if '(' in user_display else f"User_{discord_id}",
-                     user_data['ign_primary'], user_data['ign_secondary'], str(role.id))
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (discord_id) DO UPDATE SET 
+                        union_name = EXCLUDED.union_name,
+                        username = EXCLUDED.username
+                """, discord_id, 
+                     user_display.split('(')[0].strip() if '(' in user_display else f"User_{discord_id}",
+                     user_data['ign_primary'], 
+                     user_data['ign_secondary'], 
+                     str(role.id),
+                     user_data['union_name_2'])
             else:
                 # Secondary IGN appointment - update union_name_2
                 await conn.execute("""
                     INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2)
-                    VALUES ($1, $2, $3, $4, (SELECT union_name FROM users WHERE discord_id = $1), $5)
-                    ON CONFLICT (discord_id) DO UPDATE SET union_name_2 = EXCLUDED.union_name_2
-                """, discord_id, user_display.split('(')[0].strip() if '(' in user_display else f"User_{discord_id}",
-                     user_data['ign_primary'], user_data['ign_secondary'], str(role.id))
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (discord_id) DO UPDATE SET 
+                        union_name_2 = EXCLUDED.union_name_2,
+                        username = EXCLUDED.username
+                """, discord_id, 
+                     user_display.split('(')[0].strip() if '(' in user_display else f"User_{discord_id}",
+                     user_data['ign_primary'], 
+                     user_data['ign_secondary'], 
+                     user_data['union_name'],
+                     str(role.id))
+
+            # Also assign the Discord role
+            try:
+                member = interaction.guild.get_member(int(discord_id))
+                if member:
+                    await member.add_roles(role, reason=f"Appointed as union leader by {interaction.user}")
+                    role_status = f" and assigned **@{role.name}** Discord role"
+                else:
+                    role_status = " (Discord role not assigned - user not in server)"
+            except Exception as role_error:
+                role_status = f" (Discord role assignment failed: {str(role_error)})"
 
             await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) appointed as leader of **{role.name}** and automatically added as a member using {ign_type} IGN", 
+                f"✅ **{ign}** ({user_display}) appointed as leader of **{role.name}** and automatically added as a member using {ign_type} IGN{role_status}", 
                 ephemeral=True
             )
         except Exception as e:
@@ -256,12 +278,19 @@ class UnionManagement(commands.Cog):
                     )
                     return
                 # Remove secondary leadership
-                await conn.execute("UPDATE union_leaders SET role_id_2 = NULL WHERE user_id = $1", int(discord_id))
+                await conn.execute("UPDATE union_leaders SET role_id_2 = NULL WHERE user_id = $2", int(discord_id))
             
             # Clean up record if both leadership slots are now NULL
             updated_leadership = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(discord_id))
             if updated_leadership and not updated_leadership['role_id'] and not updated_leadership['role_id_2']:
                 await conn.execute("DELETE FROM union_leaders WHERE user_id = $1", int(discord_id))
+            
+            # Get user display for response
+            try:
+                discord_user = await self.bot.fetch_user(int(discord_id))
+                user_display = f"{discord_user.mention} ({discord_user.name})"
+            except:
+                user_display = f"User ID: {discord_id}"
             
             await interaction.response.send_message(
                 f"✅ **{ign}** ({user_display}) dismissed as leader of **{role.name}**", 
