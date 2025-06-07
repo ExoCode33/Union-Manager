@@ -12,14 +12,18 @@ class BasicCommands(commands.Cog):
     async def register_primary_ign(self, interaction: discord.Interaction, username: discord.Member, ign: str):
         conn = await get_connection()
         try:
-            await conn.execute("""
-                INSERT INTO users (discord_id, ign_primary, ign_secondary, union_name)
-                VALUES ($1, $2,
-                        (SELECT ign_secondary FROM users WHERE discord_id = $1),
-                        (SELECT union_name FROM users WHERE discord_id = $1))
-                ON CONFLICT (discord_id) DO UPDATE
-                SET ign_primary = EXCLUDED.ign_primary
-            """, str(username.id), ign)
+            # First, check if user exists and get their current data
+            existing_user = await conn.fetchrow("SELECT * FROM users WHERE discord_id = $1", str(username.id))
+            
+            if existing_user:
+                # User exists, just update primary IGN
+                await conn.execute("UPDATE users SET ign_primary = $1 WHERE discord_id = $2", ign, str(username.id))
+            else:
+                # User doesn't exist, create new record with primary IGN
+                await conn.execute("""
+                    INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name)
+                    VALUES ($1, $2, $3, NULL, NULL)
+                """, str(username.id), username.display_name, ign)
 
             await interaction.response.send_message(
                 f"✅ Primary IGN for {username.mention} ({username.name}) set to **{ign}**", ephemeral=True
@@ -34,15 +38,18 @@ class BasicCommands(commands.Cog):
     async def register_secondary_ign(self, interaction: discord.Interaction, username: discord.Member, ign: str):
         conn = await get_connection()
         try:
-            await conn.execute("""
-                INSERT INTO users (discord_id, ign_primary, ign_secondary, union_name)
-                VALUES ($1,
-                        (SELECT ign_primary FROM users WHERE discord_id = $1),
-                        $2,
-                        (SELECT union_name FROM users WHERE discord_id = $1))
-                ON CONFLICT (discord_id) DO UPDATE
-                SET ign_secondary = EXCLUDED.ign_secondary
-            """, str(username.id), ign)
+            # First, check if user exists and get their current data
+            existing_user = await conn.fetchrow("SELECT * FROM users WHERE discord_id = $1", str(username.id))
+            
+            if existing_user:
+                # User exists, just update secondary IGN
+                await conn.execute("UPDATE users SET ign_secondary = $1 WHERE discord_id = $2", ign, str(username.id))
+            else:
+                # User doesn't exist, create new record with secondary IGN
+                await conn.execute("""
+                    INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name)
+                    VALUES ($1, $2, NULL, $3, NULL)
+                """, str(username.id), username.display_name, ign)
 
             await interaction.response.send_message(
                 f"✅ Secondary IGN for {username.mention} ({username.name}) set to **{ign}**", ephemeral=True
