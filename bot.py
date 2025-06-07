@@ -16,7 +16,8 @@ async def on_ready():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             discord_id TEXT PRIMARY KEY,
-            ign TEXT,
+            ign_primary TEXT,
+            ign_secondary TEXT,
             union_name TEXT
         )
     """)
