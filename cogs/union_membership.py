@@ -8,7 +8,9 @@ class UnionMembership(commands.Cog):
         self.bot = bot
 
     def has_admin_role(self, member):
-        return any(role.name.lower() == "admin" for role in member.roles)
+        """Check if member has admin or mod+ role"""
+        admin_roles = ["admin", "mod+"]
+        return any(role.name.lower() in admin_roles for role in member.roles)
 
     async def get_user_led_union(self, user_id):
         """Get the union role_id this user leads (checks both leadership slots)"""
@@ -186,7 +188,7 @@ class UnionMembership(commands.Cog):
     @app_commands.describe(ign="In-game name of the user to add", role="Union role to add them to")
     async def admin_add_user_to_union(self, interaction: discord.Interaction, ign: str, role: discord.Role):
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=True)
             return
 
         conn = await get_connection()
@@ -277,7 +279,7 @@ class UnionMembership(commands.Cog):
     @app_commands.describe(ign="In-game name to remove", role="Union role to remove them from")
     async def admin_remove_user_from_union(self, interaction: discord.Interaction, ign: str, role: discord.Role):
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=True)
             return
 
         conn = await get_connection()
