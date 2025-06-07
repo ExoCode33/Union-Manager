@@ -7,9 +7,9 @@ class BasicCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="register_ign", description="Register a user's primary in-game name")
+    @app_commands.command(name="register_primary_ign", description="Register a user's primary in-game name")
     @app_commands.describe(username="Discord username", ign="Primary in-game name")
-    async def register_ign(self, interaction: discord.Interaction, username: discord.Member, ign: str):
+    async def register_primary_ign(self, interaction: discord.Interaction, username: discord.Member, ign: str):
         conn = await get_connection()
         try:
             await conn.execute("""
@@ -52,9 +52,9 @@ class BasicCommands(commands.Cog):
         finally:
             await conn.close()
 
-    @app_commands.command(name="deregister_ign", description="Remove a user's primary IGN registration")
+    @app_commands.command(name="deregister_primary_ign", description="Remove a user's primary IGN registration")
     @app_commands.describe(username="Discord username")
-    async def deregister_ign(self, interaction: discord.Interaction, username: discord.Member):
+    async def deregister_primary_ign(self, interaction: discord.Interaction, username: discord.Member):
         conn = await get_connection()
         try:
             result = await conn.execute("UPDATE users SET ign_primary = NULL WHERE discord_id = $1", str(username.id))
