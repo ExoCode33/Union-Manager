@@ -136,41 +136,5 @@ class UnionInfo(commands.Cog):
         finally:
             conn.close()
 
-    @app_commands.command(name="search_by_ign", description="Search for a Discord user by their IGN")
-    @app_commands.describe(ign="In-game name to search for")
-    async def search_by_ign(self, interaction: discord.Interaction, ign: str):
-        conn = self.get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT discord_id, ign_primary, ign_secondary, union_name FROM users WHERE ign_primary = ? OR ign_secondary = ?", 
-                (ign, ign)
-            )
-            row = cursor.fetchone()
-
-            if not row:
-                await interaction.response.send_message(f"❌ No Discord user found with IGN **{ign}**")
-                return
-
-            try:
-                discord_user = await self.bot.fetch_user(int(row['discord_id']))
-                user_display = f"{discord_user.mention} ({discord_user.name})"
-            except:
-                user_display = f"Unknown User (ID: {row['discord_id']})"
-
-            ign_type = "Primary" if row['ign_primary'] == ign else "Secondary"
-
-            response = f"**IGN:** {ign} ({ign_type})\n"
-            response += f"**Discord:** {user_display}\n"
-            response += f"**Primary IGN:** {row['ign_primary'] or 'Not registered'}\n"
-            response += f"**Secondary IGN:** {row['ign_secondary'] or 'Not registered'}\n"
-            response += f"**Union:** {row['union_name'] or 'Not assigned'}"
-
-            await interaction.response.send_message(response)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error searching IGN: {str(e)}", ephemeral=True)
-        finally:
-            conn.close()
-
 async def setup(bot):
     await bot.add_cog(UnionInfo(bot))
