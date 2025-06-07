@@ -125,23 +125,56 @@ class UnionManagement(commands.Cog):
         finally:
             conn.close()
 
-    @app_commands.command(name="dismiss_union_leader", description="Dismiss a union leader (Admin only)")
-    @app_commands.describe(role="Union role to dismiss leader from")
-    async def dismiss_union_leader(self, interaction: discord.Interaction, role: discord.Role):
+    @app_commands.command(name="dismiss_union_leader", description="Dismiss a union leader by IGN (Admin only)")
+    @app_commands.describe(ign="In-game name of the leader to dismiss", role="Union role to dismiss leader from")
+    async def dismiss_union_leader(self, interaction: discord.Interaction, ign: str, role: discord.Role):
         if not self.has_admin_role(interaction.user):
             await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            return
+
+        # Find Discord user by IGN
+        discord_id = await self.find_user_by_ign(ign)
+        if not discord_id:
+            await interaction.response.send_message(
+                f"❌ No Discord user found with IGN **{ign}**.", 
+                ephemeral=True
+            )
             return
 
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM union_leaders WHERE role_name = ?", (role.name,))
+            
+            # Check if this user is actually the leader of this union
+            cursor.execute("SELECT leader_id FROM union_leaders WHERE role_name = ?", (role.name,))
+            current_leader = cursor.fetchone()
+            
+            if not current_leader:
+                await interaction.response.send_message(f"❌ No leader found for **{role.name}**", ephemeral=True)
+                return
+                
+            if current_leader['leader_id'] != discord_id:
+                await interaction.response.send_message(
+                    f"❌ **{ign}** is not the leader of **{role.name}**", 
+                    ephemeral=True
+                )
+                return
+
+            # Get the Discord user object for display
+            try:
+                discord_user = await self.bot.fetch_user(int(discord_id))
+                user_display = f"{discord_user.mention} ({discord_user.name})"
+            except:
+                user_display = f"User ID: {discord_id}"
+
+            # Remove the leader
+            cursor.execute("DELETE FROM union_leaders WHERE role_name = ? AND leader_id = ?", (role.name, discord_id))
             conn.commit()
             
-            if cursor.rowcount > 0:
-                await interaction.response.send_message(f"✅ Leader dismissed from **{role.name}**", ephemeral=True)
-            else:
-                await interaction.response.send_message(f"❌ No leader found for **{role.name}**", ephemeral=True)
+            await interaction.response.send_message(
+                f"✅ **{ign}** ({user_display}) dismissed as leader of **{role.name}**", 
+                ephemeral=True
+            )
         except Exception as e:
             await interaction.response.send_message(f"❌ Error dismissing union leader: {str(e)}", ephemeral=True)
         finally:
