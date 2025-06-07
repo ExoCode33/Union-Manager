@@ -68,14 +68,29 @@ class UnionMembership(commands.Cog):
             else:
                 await conn.execute("UPDATE users SET union_name_2 = $1 WHERE discord_id = $2", str(led_union_id), row['discord_id'])
 
+            # Get Discord user for display and role assignment
             try:
                 discord_user = await self.bot.fetch_user(int(row['discord_id']))
                 user_display = f"{discord_user.mention} ({discord_user.name})"
+                
+                # Try to get the member object to assign the role
+                try:
+                    member = interaction.guild.get_member(int(row['discord_id']))
+                    if member:
+                        # Assign the Discord role
+                        await member.add_roles(led_union_role, reason=f"Added to union via leader command by {interaction.user}")
+                        role_status = f" and assigned **@{led_union_name}** Discord role"
+                    else:
+                        role_status = " (Discord role not assigned - user not in server)"
+                except Exception as role_error:
+                    role_status = f" (Discord role assignment failed: {str(role_error)})"
+                    
             except:
                 user_display = f"User ID: {row['discord_id']}"
+                role_status = " (Discord role not assigned - user not found)"
 
             await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) added to your union **{led_union_name}** using {ign_type} IGN", 
+                f"✅ **{ign}** ({user_display}) added to your union **{led_union_name}** using {ign_type} IGN{role_status}", 
                 ephemeral=True
             )
         except Exception as e:
@@ -131,14 +146,35 @@ class UnionMembership(commands.Cog):
             else:
                 await conn.execute("UPDATE users SET union_name_2 = NULL WHERE discord_id = $1", row['discord_id'])
 
+            # Get Discord user for display and role removal
             try:
                 discord_user = await self.bot.fetch_user(int(row['discord_id']))
                 user_display = f"{discord_user.mention} ({discord_user.name})"
+                
+                # Try to get the member object to remove the role
+                try:
+                    member = interaction.guild.get_member(int(row['discord_id']))
+                    if member:
+                        # Check if user should still have this role (other IGN might still be in this union)
+                        other_union = row['union_name_2'] if is_primary_ign else row['union_name']
+                        if str(other_union) == str(led_union_id):
+                            # Their other IGN is still in this union, don't remove role
+                            role_status = " (Discord role kept - other IGN still in union)"
+                        else:
+                            # Remove the Discord role
+                            await member.remove_roles(led_union_role, reason=f"Removed from union via leader command by {interaction.user}")
+                            role_status = f" and removed **@{led_union_name}** Discord role"
+                    else:
+                        role_status = " (Discord role not removed - user not in server)"
+                except Exception as role_error:
+                    role_status = f" (Discord role removal failed: {str(role_error)})"
+                    
             except:
                 user_display = f"User ID: {row['discord_id']}"
+                role_status = " (Discord role not removed - user not found)"
 
             await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) removed from your union **{led_union_name}** ({ign_type} IGN slot)", 
+                f"✅ **{ign}** ({user_display}) removed from your union **{led_union_name}** ({ign_type} IGN slot){role_status}", 
                 ephemeral=True
             )
         except Exception as e:
@@ -207,15 +243,29 @@ class UnionMembership(commands.Cog):
             else:
                 await conn.execute("UPDATE users SET union_name_2 = $1 WHERE discord_id = $2", str(role.id), user_row['discord_id'])
 
-            # Get Discord user for display
+            # Get Discord user for display and role assignment
             try:
                 discord_user = await self.bot.fetch_user(int(user_row['discord_id']))
                 user_display = f"{discord_user.mention} ({discord_user.name})"
+                
+                # Try to get the member object to assign the role
+                try:
+                    member = interaction.guild.get_member(int(user_row['discord_id']))
+                    if member:
+                        # Assign the Discord role
+                        await member.add_roles(role, reason=f"Added to union via admin command by {interaction.user}")
+                        role_status = f" and assigned **@{role.name}** Discord role"
+                    else:
+                        role_status = " (Discord role not assigned - user not in server)"
+                except Exception as role_error:
+                    role_status = f" (Discord role assignment failed: {str(role_error)})"
+                    
             except:
                 user_display = f"User ID: {user_row['discord_id']}"
+                role_status = " (Discord role not assigned - user not found)"
 
             await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) added to union **{role.name}** using {ign_type} IGN (Admin override)", 
+                f"✅ **{ign}** ({user_display}) added to union **{role.name}** using {ign_type} IGN{role_status} (Admin override)", 
                 ephemeral=True
             )
         except Exception as e:
@@ -283,14 +333,35 @@ class UnionMembership(commands.Cog):
             else:
                 await conn.execute("UPDATE users SET union_name_2 = NULL WHERE discord_id = $1", row['discord_id'])
 
+            # Get Discord user for display and role removal
             try:
                 discord_user = await self.bot.fetch_user(int(row['discord_id']))
                 user_display = f"{discord_user.mention} ({discord_user.name})"
+                
+                # Try to get the member object to remove the role
+                try:
+                    member = interaction.guild.get_member(int(row['discord_id']))
+                    if member:
+                        # Check if user should still have this role (other IGN might still be in this union)
+                        other_union = row['union_name_2'] if is_primary_ign else row['union_name']
+                        if str(other_union) == str(role.id):
+                            # Their other IGN is still in this union, don't remove role
+                            role_status = " (Discord role kept - other IGN still in union)"
+                        else:
+                            # Remove the Discord role
+                            await member.remove_roles(role, reason=f"Removed from union via admin command by {interaction.user}")
+                            role_status = f" and removed **@{role.name}** Discord role"
+                    else:
+                        role_status = " (Discord role not removed - user not in server)"
+                except Exception as role_error:
+                    role_status = f" (Discord role removal failed: {str(role_error)})"
+                    
             except:
                 user_display = f"User ID: {row['discord_id']}"
+                role_status = " (Discord role not removed - user not found)"
 
             await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) removed from union **{role.name}** ({ign_type} IGN slot) (Admin override)", 
+                f"✅ **{ign}** ({user_display}) removed from union **{role.name}** ({ign_type} IGN slot){role_status} (Admin override)", 
                 ephemeral=True
             )
         except Exception as e:
