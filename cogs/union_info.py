@@ -110,4 +110,14 @@ class UnionInfo(commands.Cog):
 
                     member_list = "\n".join(member_entries)
 
-                embed.add_field(name=f"**{role_name}**", valu**_**_
+                embed.add_field(name=f"**{role_name}**", value=member_list, inline=False)
+
+            await interaction.response.send_message(embed=embed)
+
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+        finally:
+            await conn.close()
+
+async def setup(bot):
+    await bot.add_cog(UnionInfo(bot))
