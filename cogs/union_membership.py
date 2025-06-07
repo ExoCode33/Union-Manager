@@ -11,11 +11,14 @@ class UnionMembership(commands.Cog):
         return any(role.name.lower() == "admin" for role in member.roles)
 
     async def get_user_led_union(self, user_id):
-        """Get the union role_id this user leads"""
+        """Get the union role_id this user leads (checks both leadership slots)"""
         conn = await get_connection()
         try:
-            row = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1", int(user_id))
-            return int(row['role_id']) if row else None
+            row = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(user_id))
+            if row:
+                # Return the first non-null leadership role (prioritize role_id)
+                return int(row['role_id']) if row['role_id'] else (int(row['role_id_2']) if row['role_id_2'] else None)
+            return None
         finally:
             await conn.close()
 
