@@ -76,7 +76,7 @@ class UnionInfo(commands.Cog):
                     """
                     SELECT discord_id, ign_primary, ign_secondary
                     FROM users
-                    WHERE union_role_id = $1
+                    WHERE union_name = $1
                     ORDER BY discord_id
                     """,
                     role_id
