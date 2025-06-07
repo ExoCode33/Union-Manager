@@ -8,7 +8,9 @@ class UnionManagement(commands.Cog):
         self.bot = bot
 
     def has_admin_role(self, member):
-        return any(role.name.lower() == "admin" for role in member.roles)
+        """Check if member has admin or mod+ role"""
+        admin_roles = ["admin", "mod+"]
+        return any(role.name.lower() in admin_roles for role in member.roles)
 
     async def find_user_by_ign(self, ign):
         """Find Discord user by their primary or secondary IGN"""
@@ -26,7 +28,7 @@ class UnionManagement(commands.Cog):
     @app_commands.describe(role="Discord role to register as union")
     async def register_role_as_union(self, interaction: discord.Interaction, role: discord.Role):
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=True)
             return
 
         if not role.name.startswith("Union-"):
@@ -49,7 +51,7 @@ class UnionManagement(commands.Cog):
     @app_commands.describe(role="Discord role to deregister")
     async def deregister_role_as_union(self, interaction: discord.Interaction, role: discord.Role):
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=True)
             return
 
         conn = await get_connection()
@@ -68,7 +70,7 @@ class UnionManagement(commands.Cog):
     @app_commands.describe(ign="In-game name of the player to appoint as leader", role="Union role")
     async def appoint_union_leader(self, interaction: discord.Interaction, ign: str, role: discord.Role):
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=True)
             return
 
         # Find Discord user by IGN
@@ -222,7 +224,7 @@ class UnionManagement(commands.Cog):
     @app_commands.describe(ign="In-game name of the leader to dismiss", role="Union role to dismiss leader from")
     async def dismiss_union_leader(self, interaction: discord.Interaction, ign: str, role: discord.Role):
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=True)
             return
 
         # Find Discord user by IGN
