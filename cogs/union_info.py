@@ -108,11 +108,11 @@ class UnionInfo(commands.Cog):
                 leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1", role_id)
                 leader_id = leader_row['user_id'] if leader_row else None
 
-                # Get all members
+                # Get all members - check both union_name and union_name_2
                 members = await conn.fetch("""
                     SELECT discord_id, ign_primary, ign_secondary
                     FROM users
-                    WHERE union_name = $1
+                    WHERE union_name = $1 OR union_name_2 = $1
                     ORDER BY discord_id
                 """, str(role_id))
 
@@ -231,7 +231,7 @@ class UnionInfo(commands.Cog):
             # Add summary
             total_unions = len(unions)
             unions_with_leaders = await conn.fetchval("SELECT COUNT(*) FROM union_leaders")
-            total_members = await conn.fetchval("SELECT COUNT(*) FROM users WHERE union_name IS NOT NULL")
+            total_members = await conn.fetchval("SELECT COUNT(*) FROM users WHERE union_name IS NOT NULL OR union_name_2 IS NOT NULL")
             
             try:
                 command_user = interaction.user
