@@ -1,86 +1,119 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
-from utils.db import get_connection
+from discord import app_commands
+import sqlite3
 
 class UnionManagement(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def has_admin_or_mod_permissions(self, member: discord.Member) -> bool:
-        """Check if user has Admin permissions"""
-        # Check for Administrator permission
-        if member.guild_permissions.administrator:
-            return True
-        
-        # Check for roles named "Admin" (case insensitive)
-        admin_roles = {'admin'}
-        for role in member.roles:
-            if role.name.lower() in admin_roles:
-                return True
-        
-        return False
+    def get_db_connection(self):
+        return sqlite3.connect("database.db")
 
-    # /register_role_as_union
-    @app_commands.command(name="register_role_as_union", description="Register a Discord role as a union")
-    @app_commands.describe(role="The Discord role to register as a union")
-    async def register_union_role(self, interaction: discord.Interaction, role: discord.Role):
-        conn = await get_connection()
+    def has_admin_role(self, member):
+        return any(role.name.lower() == "admin" for role in member.roles)
+
+    @app_commands.command(name="register_role_as_union", description="Register a Discord role as a union (Admin only)")
+    @app_commands.describe(role="Discord role to register as union")
+    async def register_role_as_union(self, interaction: discord.Interaction, role: discord.Role):
+        if not self.has_admin_role(interaction.user):
+            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            return
+
+        if not role.name.startswith("Union-"):
+            await interaction.response.send_message("❌ Role name must start with 'Union-' prefix.", ephemeral=True)
+            return
+
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
         try:
-            # Ensure role.id is treated as an integer
-            role_id = int(role.id) if isinstance(role.id, str) else role.id
-            await conn.execute(
-                "INSERT INTO union_roles (role_id) VALUES ($1) ON CONFLICT (role_id) DO NOTHING",
-                role_id
-            )
+            cursor.execute("INSERT OR IGNORE INTO union_roles (role_name) VALUES (?)", (role.name,))
+            if cursor.rowcount > 0:
+                conn.commit()
+                await interaction.response.send_message(f"✅ Role **{role.name}** registered as union", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ Role **{role.name}** is already registered as union", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error registering union role: {str(e)}", ephemeral=True)
         finally:
-            await conn.close()
-        
-        await interaction.response.send_message(f"✅ Registered union: `{role.name}`")
+            conn.close()
 
-    # /deregister_role_as_union
-    @app_commands.command(name="deregister_role_as_union", description="Deregister a union role")
-    @app_commands.describe(role="The union role to deregister")
-    async def deregister_union_role(self, interaction: discord.Interaction, role: discord.Role):
-        conn = await get_connection()
+    @app_commands.command(name="deregister_role_as_union", description="Deregister a union role (Admin only)")
+    @app_commands.describe(role="Discord role to deregister")
+    async def deregister_role_as_union(self, interaction: discord.Interaction, role: discord.Role):
+        if not self.has_admin_role(interaction.user):
+            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            return
+
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
         try:
-            role_id = int(role.id) if isinstance(role.id, str) else role.id
-            await conn.execute("DELETE FROM union_roles WHERE role_id = $1", role_id)
+            # Remove from union_roles
+            cursor.execute("DELETE FROM union_roles WHERE role_name = ?", (role.name,))
+            # Remove leader assignment
+            cursor.execute("DELETE FROM union_leaders WHERE role_name = ?", (role.name,))
+            # Remove users from this union
+            cursor.execute("UPDATE users SET union_name = NULL WHERE union_name = ?", (role.name,))
+            
+            if cursor.rowcount > 0:
+                conn.commit()
+                await interaction.response.send_message(f"✅ Union **{role.name}** deregistered and all members removed", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ Role **{role.name}** was not registered as union", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error deregistering union role: {str(e)}", ephemeral=True)
         finally:
-            await conn.close()
-        
-        await interaction.response.send_message(f"🗑️ Deregistered union: `{role.name}`")
+            conn.close()
 
-    # /appoint_union_leader
-    @app_commands.command(name="appoint_union_leader", description="Appoint a union leader")
-    @app_commands.describe(user="The user to appoint", role="The union role to assign")
-    async def appoint_union_leader(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
-        conn = await get_connection()
+    @app_commands.command(name="appoint_union_leader", description="Appoint a union leader (Admin only)")
+    @app_commands.describe(username="User to appoint as leader", role="Union role")
+    async def appoint_union_leader(self, interaction: discord.Interaction, username: discord.Member, role: discord.Role):
+        if not self.has_admin_role(interaction.user):
+            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            return
+
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
         try:
-            user_id = int(user.id) if isinstance(user.id, str) else user.id
-            role_id = int(role.id) if isinstance(role.id, str) else role.id
-            await conn.execute(
-                "INSERT INTO union_leaders (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET role_id = $2",
-                user_id, role_id
-            )
-        finally:
-            await conn.close()
-        
-        await interaction.response.send_message(f"👑 `{user.display_name}` appointed as leader of `{role.name}`")
+            # Check if role is registered as union
+            cursor.execute("SELECT role_name FROM union_roles WHERE role_name = ?", (role.name,))
+            if not cursor.fetchone():
+                await interaction.response.send_message(f"❌ Role **{role.name}** is not registered as union", ephemeral=True)
+                return
 
-    # /dismiss_union_leader
-    @app_commands.command(name="dismiss_union_leader", description="Dismiss a union leader")
-    @app_commands.describe(user="The leader to dismiss")
-    async def dismiss_union_leader(self, interaction: discord.Interaction, user: discord.Member):
-        conn = await get_connection()
+            cursor.execute("INSERT OR REPLACE INTO union_leaders (role_name, leader_id) VALUES (?, ?)", 
+                         (role.name, str(username.id)))
+            conn.commit()
+            await interaction.response.send_message(f"✅ {username.mention} appointed as leader of **{role.name}**", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error appointing union leader: {str(e)}", ephemeral=True)
+        finally:
+            conn.close()
+
+    @app_commands.command(name="dismiss_union_leader", description="Dismiss a union leader (Admin only)")
+    @app_commands.describe(role="Union role to dismiss leader from")
+    async def dismiss_union_leader(self, interaction: discord.Interaction, role: discord.Role):
+        if not self.has_admin_role(interaction.user):
+            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
+            return
+
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
         try:
-            user_id = int(user.id) if isinstance(user.id, str) else user.id
-            await conn.execute("DELETE FROM union_leaders WHERE user_id = $1", user_id)
+            cursor.execute("DELETE FROM union_leaders WHERE role_name = ?", (role.name,))
+            if cursor.rowcount > 0:
+                conn.commit()
+                await interaction.response.send_message(f"✅ Leader dismissed from **{role.name}**", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ No leader found for **{role.name}**", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error dismissing union leader: {str(e)}", ephemeral=True)
         finally:
-            await conn.close()
-        
-        await interaction.response.send_message(f"❌ `{user.display_name}` has been dismissed as a leader.")
+            conn.close()
 
-
-async def setup(bot: commands.Bot):
+async def setup(bot):
     await bot.add_cog(UnionManagement(bot))
