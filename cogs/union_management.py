@@ -168,8 +168,27 @@ class UnionManagement(commands.Cog):
                 else:
                     await conn.execute("INSERT INTO union_leaders (user_id, role_id, role_id_2) VALUES ($1, NULL, $2)", int(discord_id), role.id)
 
+            # Appointment successful - now add them as a member automatically
+            # Determine which union slot to update based on IGN type
+            if is_primary_ign:
+                # Primary IGN appointment - update union_name
+                await conn.execute("""
+                    INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2)
+                    VALUES ($1, $2, $3, $4, $5, (SELECT union_name_2 FROM users WHERE discord_id = $1))
+                    ON CONFLICT (discord_id) DO UPDATE SET union_name = EXCLUDED.union_name
+                """, discord_id, user_display.split('(')[0].strip() if '(' in user_display else f"User_{discord_id}",
+                     user_data['ign_primary'], user_data['ign_secondary'], str(role.id))
+            else:
+                # Secondary IGN appointment - update union_name_2
+                await conn.execute("""
+                    INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2)
+                    VALUES ($1, $2, $3, $4, (SELECT union_name FROM users WHERE discord_id = $1), $5)
+                    ON CONFLICT (discord_id) DO UPDATE SET union_name_2 = EXCLUDED.union_name_2
+                """, discord_id, user_display.split('(')[0].strip() if '(' in user_display else f"User_{discord_id}",
+                     user_data['ign_primary'], user_data['ign_secondary'], str(role.id))
+
             await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) appointed as leader of **{role.name}**", 
+                f"✅ **{ign}** ({user_display}) appointed as leader of **{role.name}** and automatically added as a member using {ign_type} IGN", 
                 ephemeral=True
             )
         except Exception as e:
