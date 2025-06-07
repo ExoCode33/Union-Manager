@@ -228,38 +228,12 @@ class UnionInfo(commands.Cog):
                     
                     member_list = "\n".join(all_entries)
 
-                # Add field with member capacity
+                # Add field with member capacity - make union name even bigger
                 embed.add_field(
-                    name=f"# **{role_name}** ({member_count}/30 members)", 
+                    name=f"## **{role_name}** ({member_count}/30 members)", 
                     value=f"{member_list}",
                     inline=False
                 )
-
-            # Add summary
-            total_unions = len(unions)
-            unions_with_leaders = await conn.fetchval("SELECT COUNT(*) FROM union_leaders")
-            total_members = await conn.fetchval("SELECT COUNT(*) FROM users WHERE union_name IS NOT NULL OR union_name_2 IS NOT NULL")
-            
-            try:
-                command_user = interaction.user
-                user_data = await conn.fetchrow(
-                    "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
-                    str(command_user.id)
-                )
-                
-                if user_data and (user_data['ign_primary'] or user_data['ign_secondary']):
-                    user_ign = user_data['ign_primary'] or user_data['ign_secondary']
-                    summary_example = f"**{command_user.display_name}** ~ IGN: *{user_ign}*"
-                else:
-                    summary_example = f"**{command_user.display_name}** ~ IGN: *Not registered*"
-            except:
-                summary_example = "**ExoCode** ~ IGN: *ExoCode#Test*"
-            
-            embed.add_field(
-                name="📊 **SUMMARY**",
-                value=f"**Total Unions:** {total_unions}\n**Unions with Leaders:** {unions_with_leaders}\n**Total Members:** {total_members}\n\n**Format Example:** {summary_example}",
-                inline=False
-            )
 
             await interaction.response.send_message(embed=embed)
 
