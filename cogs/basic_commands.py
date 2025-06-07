@@ -105,27 +105,112 @@ class BasicCommands(commands.Cog):
         finally:
             conn.close()
 
-    @app_commands.command(name="search_user", description="Search for a user by Discord username")
-    @app_commands.describe(username="Discord username to search for")
-    async def search_user(self, interaction: discord.Interaction, username: discord.Member):
+    @app_commands.command(name="search_user", description="Search for a user by Discord name, username, ID, or IGN")
+    @app_commands.describe(query="Discord name, username, ID, or IGN to search for")
+    async def search_user(self, interaction: discord.Interaction, query: str):
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
+            
+            # First try to find by Discord ID (if query is numeric)
+            discord_user = None
+            if query.isdigit():
+                try:
+                    discord_user = await self.bot.fetch_user(int(query))
+                except:
+                    pass
+            
+            # If not found by ID, try to find by Discord name/username in the guild
+            if not discord_user:
+                guild = interaction.guild
+                if guild:
+                    # Search by display name or username
+                    for member in guild.members:
+                        if (query.lower() in member.display_name.lower() or 
+                            query.lower() in member.name.lower() or
+                            query.lower() == member.display_name.lower() or
+                            query.lower() == member.name.lower()):
+                            discord_user = member
+                            break
+            
+            # If found by Discord info, get their data
+            if discord_user:
+                cursor.execute(
+                    "SELECT ign_primary, ign_secondary, union_name FROM users WHERE discord_id = ?", 
+                    (str(discord_user.id),)
+                )
+                row = cursor.fetchone()
+                
+                response = f"**Discord:** {discord_user.mention} ({discord_user.name})\n"
+                if row:
+                    response += f"**Primary IGN:** {row['ign_primary'] or 'Not registered'}\n"
+                    response += f"**Secondary IGN:** {row['ign_secondary'] or 'Not registered'}\n"
+                    response += f"**Union:** {row['union_name'] or 'Not assigned'}"
+                else:
+                    response += "**Primary IGN:** Not registered\n**Secondary IGN:** Not registered\n**Union:** Not assigned"
+                
+                await interaction.response.send_message(response)
+                return
+            
+            # If not found by Discord info, search by IGN
             cursor.execute(
-                "SELECT ign_primary, ign_secondary, union_name FROM users WHERE discord_id = ?", 
-                (str(username.id),)
+                "SELECT discord_id, ign_primary, ign_secondary, union_name FROM users WHERE ign_primary LIKE ? OR ign_secondary LIKE ?", 
+                (f"%{query}%", f"%{query}%")
             )
-            row = cursor.fetchone()
-
-            response = f"**Discord:** {username.mention} ({username.name})\n"
-            if row:
+            rows = cursor.fetchall()
+            
+            if not rows:
+                await interaction.response.send_message(f"❌ No user found matching **{query}**")
+                return
+            
+            if len(rows) == 1:
+                # Single result
+                row = rows[0]
+                try:
+                    discord_user = await self.bot.fetch_user(int(row['discord_id']))
+                    user_display = f"{discord_user.mention} ({discord_user.name})"
+                except:
+                    user_display = f"Unknown User (ID: {row['discord_id']})"
+                
+                # Determine which IGN matched
+                matched_ign = ""
+                if row['ign_primary'] and query.lower() in row['ign_primary'].lower():
+                    matched_ign = f"{row['ign_primary']} (Primary)"
+                elif row['ign_secondary'] and query.lower() in row['ign_secondary'].lower():
+                    matched_ign = f"{row['ign_secondary']} (Secondary)"
+                
+                response = f"**Matched IGN:** {matched_ign}\n"
+                response += f"**Discord:** {user_display}\n"
                 response += f"**Primary IGN:** {row['ign_primary'] or 'Not registered'}\n"
                 response += f"**Secondary IGN:** {row['ign_secondary'] or 'Not registered'}\n"
                 response += f"**Union:** {row['union_name'] or 'Not assigned'}"
+                
+                await interaction.response.send_message(response)
             else:
-                response += "**Primary IGN:** Not registered\n**Secondary IGN:** Not registered\n**Union:** Not assigned"
-
-            await interaction.response.send_message(response)
+                # Multiple results
+                response = f"**Multiple users found matching '{query}':**\n\n"
+                for i, row in enumerate(rows[:5]):  # Limit to 5 results
+                    try:
+                        discord_user = await self.bot.fetch_user(int(row['discord_id']))
+                        user_display = f"{discord_user.mention} ({discord_user.name})"
+                    except:
+                        user_display = f"Unknown User (ID: {row['discord_id']})"
+                    
+                    # Show which IGN matched
+                    matched_ign = ""
+                    if row['ign_primary'] and query.lower() in row['ign_primary'].lower():
+                        matched_ign = row['ign_primary']
+                    elif row['ign_secondary'] and query.lower() in row['ign_secondary'].lower():
+                        matched_ign = row['ign_secondary']
+                    
+                    response += f"**{i+1}.** {user_display}\n"
+                    response += f"   IGN: {matched_ign} | Union: {row['union_name'] or 'None'}\n\n"
+                
+                if len(rows) > 5:
+                    response += f"*... and {len(rows) - 5} more results*"
+                
+                await interaction.response.send_message(response)
+                
         except Exception as e:
             await interaction.response.send_message(f"❌ Error searching user: {str(e)}", ephemeral=True)
         finally:
