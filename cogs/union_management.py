@@ -94,54 +94,79 @@ class UnionManagement(commands.Cog):
             except:
                 user_display = f"User ID: {discord_id}"
 
-            # Check if this specific IGN is already leading another union
-            # First, determine which IGN slot this IGN belongs to for this user
+            # Check current leadership status
+            existing_leadership = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(discord_id))
+            
+            # Determine which IGN slot this IGN belongs to
             user_data = await conn.fetchrow(
                 "SELECT ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE discord_id = $1",
                 discord_id
             )
             
-            if user_data:
-                is_primary_ign = (user_data['ign_primary'] == ign)
-                current_union_for_ign = user_data['union_name'] if is_primary_ign else user_data['union_name_2']
-                ign_type = "Primary" if is_primary_ign else "Secondary"
-                
-                # Check if this IGN is already leading a union (by checking if user leads the union they're in with this IGN)
-                if current_union_for_ign:
-                    # Check if user is leader of the union this IGN is in
-                    existing_leadership = await conn.fetchrow(
-                        "SELECT role_id FROM union_leaders WHERE user_id = $1 AND role_id = $2", 
-                        int(discord_id), int(current_union_for_ign)
-                    )
-                    
-                    if existing_leadership and int(current_union_for_ign) != role.id:
-                        # This IGN is already leading a different union
-                        existing_role = interaction.guild.get_role(int(current_union_for_ign))
-                        existing_role_name = existing_role.name if existing_role else f"Role ID: {current_union_for_ign}"
-                        
-                        await interaction.response.send_message(
-                            f"❌ **{ign}** ({ign_type} IGN) is already leading **{existing_role_name}**. "
-                            f"An IGN can only lead one union at a time. Use `/dismiss_union_leader` first if you want to transfer leadership.",
-                            ephemeral=True
-                        )
-                        return
-                    elif existing_leadership and int(current_union_for_ign) == role.id:
-                        # This IGN is already leading this same union
-                        await interaction.response.send_message(
-                            f"❌ **{ign}** ({ign_type} IGN) is already the leader of **{role.name}**",
-                            ephemeral=True
-                        )
-                        return
-
-            # Check if role already has a leader and replace them
-            existing_leader = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1", role.id)
+            if not user_data:
+                await interaction.response.send_message(
+                    f"❌ User with IGN **{ign}** not found in database. They must register their IGN first.",
+                    ephemeral=True
+                )
+                return
             
-            if existing_leader:
-                # Update existing leader
-                await conn.execute("UPDATE union_leaders SET user_id = $1 WHERE role_id = $2", int(discord_id), role.id)
+            is_primary_ign = (user_data['ign_primary'] == ign)
+            is_secondary_ign = (user_data['ign_secondary'] == ign)
+            
+            if not is_primary_ign and not is_secondary_ign:
+                await interaction.response.send_message(
+                    f"❌ IGN **{ign}** is not registered for this Discord user.",
+                    ephemeral=True
+                )
+                return
+            
+            ign_type = "Primary" if is_primary_ign else "Secondary"
+            target_column = "role_id" if is_primary_ign else "role_id_2"
+            
+            if existing_leadership:
+                current_role_primary = existing_leadership['role_id']
+                current_role_secondary = existing_leadership['role_id_2']
+                
+                # Check if this IGN is already leading another union
+                if is_primary_ign and current_role_primary and current_role_primary != role.id:
+                    # Primary IGN already leads another union
+                    existing_role = interaction.guild.get_role(current_role_primary)
+                    existing_role_name = existing_role.name if existing_role else f"Role ID: {current_role_primary}"
+                    await interaction.response.send_message(
+                        f"❌ **{ign}** (Primary IGN) is already leading **{existing_role_name}**. "
+                        f"Use `/dismiss_union_leader` first to transfer leadership.",
+                        ephemeral=True
+                    )
+                    return
+                elif is_secondary_ign and current_role_secondary and current_role_secondary != role.id:
+                    # Secondary IGN already leads another union
+                    existing_role = interaction.guild.get_role(current_role_secondary)
+                    existing_role_name = existing_role.name if existing_role else f"Role ID: {current_role_secondary}"
+                    await interaction.response.send_message(
+                        f"❌ **{ign}** (Secondary IGN) is already leading **{existing_role_name}**. "
+                        f"Use `/dismiss_union_leader` first to transfer leadership.",
+                        ephemeral=True
+                    )
+                    return
+                elif (is_primary_ign and current_role_primary == role.id) or (is_secondary_ign and current_role_secondary == role.id):
+                    # Already leading this union with this IGN
+                    await interaction.response.send_message(
+                        f"❌ **{ign}** is already the leader of **{role.name}**",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Update existing leadership record
+                if is_primary_ign:
+                    await conn.execute("UPDATE union_leaders SET role_id = $1 WHERE user_id = $2", role.id, int(discord_id))
+                else:
+                    await conn.execute("UPDATE union_leaders SET role_id_2 = $1 WHERE user_id = $2", role.id, int(discord_id))
             else:
-                # Insert new leader
-                await conn.execute("INSERT INTO union_leaders (role_id, user_id) VALUES ($1, $2)", role.id, int(discord_id))
+                # Create new leadership record
+                if is_primary_ign:
+                    await conn.execute("INSERT INTO union_leaders (user_id, role_id, role_id_2) VALUES ($1, $2, NULL)", int(discord_id), role.id)
+                else:
+                    await conn.execute("INSERT INTO union_leaders (user_id, role_id, role_id_2) VALUES ($1, NULL, $2)", int(discord_id), role.id)
 
             await interaction.response.send_message(
                 f"✅ **{ign}** ({user_display}) appointed as leader of **{role.name}**", 
@@ -170,29 +195,54 @@ class UnionManagement(commands.Cog):
 
         conn = await get_connection()
         try:
-            # Check if this user is actually the leader of this union
-            current_leader = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1", role.id)
+            # Check current leadership status
+            current_leadership = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(discord_id))
             
-            if not current_leader:
-                await interaction.response.send_message(f"❌ No leader found for **{role.name}**", ephemeral=True)
+            if not current_leadership:
+                await interaction.response.send_message(f"❌ No leadership found for IGN **{ign}**", ephemeral=True)
                 return
-                
-            if current_leader['user_id'] != int(discord_id):
-                await interaction.response.send_message(
-                    f"❌ **{ign}** is not the leader of **{role.name}**", 
-                    ephemeral=True
-                )
+            
+            # Determine which IGN slot this IGN belongs to
+            user_data = await conn.fetchrow(
+                "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1",
+                discord_id
+            )
+            
+            if not user_data:
+                await interaction.response.send_message(f"❌ User data not found for IGN **{ign}**", ephemeral=True)
                 return
-
-            # Get the Discord user object for display
-            try:
-                discord_user = await self.bot.fetch_user(int(discord_id))
-                user_display = f"{discord_user.mention} ({discord_user.name})"
-            except:
-                user_display = f"User ID: {discord_id}"
-
-            # Remove the leader
-            await conn.execute("DELETE FROM union_leaders WHERE role_id = $1 AND user_id = $2", role.id, int(discord_id))
+            
+            is_primary_ign = (user_data['ign_primary'] == ign)
+            is_secondary_ign = (user_data['ign_secondary'] == ign)
+            
+            if not is_primary_ign and not is_secondary_ign:
+                await interaction.response.send_message(f"❌ IGN **{ign}** is not registered for this user", ephemeral=True)
+                return
+            
+            # Check if this IGN is actually leading this role
+            if is_primary_ign:
+                if current_leadership['role_id'] != role.id:
+                    await interaction.response.send_message(
+                        f"❌ **{ign}** (Primary IGN) is not the leader of **{role.name}**", 
+                        ephemeral=True
+                    )
+                    return
+                # Remove primary leadership
+                await conn.execute("UPDATE union_leaders SET role_id = NULL WHERE user_id = $1", int(discord_id))
+            else:
+                if current_leadership['role_id_2'] != role.id:
+                    await interaction.response.send_message(
+                        f"❌ **{ign}** (Secondary IGN) is not the leader of **{role.name}**", 
+                        ephemeral=True
+                    )
+                    return
+                # Remove secondary leadership
+                await conn.execute("UPDATE union_leaders SET role_id_2 = NULL WHERE user_id = $1", int(discord_id))
+            
+            # Clean up record if both leadership slots are now NULL
+            updated_leadership = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(discord_id))
+            if updated_leadership and not updated_leadership['role_id'] and not updated_leadership['role_id_2']:
+                await conn.execute("DELETE FROM union_leaders WHERE user_id = $1", int(discord_id))
             
             await interaction.response.send_message(
                 f"✅ **{ign}** ({user_display}) dismissed as leader of **{role.name}**", 
