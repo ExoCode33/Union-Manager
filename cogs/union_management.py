@@ -94,12 +94,15 @@ class UnionManagement(commands.Cog):
             except:
                 user_display = f"User ID: {discord_id}"
 
-            # Insert/update union leader
-            await conn.execute("""
-                INSERT INTO union_leaders (role_id, user_id)
-                VALUES ($1, $2)
-                ON CONFLICT (role_id) DO UPDATE SET user_id = EXCLUDED.user_id
-            """, role.id, int(discord_id))
+            # Insert/update union leader - use separate check and insert/update
+            existing_leader = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1", role.id)
+            
+            if existing_leader:
+                # Update existing leader
+                await conn.execute("UPDATE union_leaders SET user_id = $1 WHERE role_id = $2", int(discord_id), role.id)
+            else:
+                # Insert new leader
+                await conn.execute("INSERT INTO union_leaders (role_id, user_id) VALUES ($1, $2)", role.id, int(discord_id))
 
             await interaction.response.send_message(
                 f"✅ **{ign}** ({user_display}) appointed as leader of **{role.name}**", 
