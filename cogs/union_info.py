@@ -12,11 +12,11 @@ class UnionInfo(commands.Cog):
         conn = await get_connection()
         try:
             rows = await conn.fetch("""
-                SELECT ul.role_id, ul.user_id, u.ign_primary, u.ign_secondary
+                SELECT ul.user_id, ul.role_id, ul.role_id_2, u.ign_primary, u.ign_secondary
                 FROM union_leaders ul
-                JOIN union_roles ur ON ul.role_id::text = ur.role_id::text
                 LEFT JOIN users u ON ul.user_id::text = u.discord_id
-                ORDER BY ul.role_id
+                WHERE ul.role_id IS NOT NULL OR ul.role_id_2 IS NOT NULL
+                ORDER BY ul.user_id
             """)
 
             if not rows:
@@ -31,14 +31,11 @@ class UnionInfo(commands.Cog):
             embed.set_footer(text="Use /appoint_union_leader to assign new leaders")
 
             for row in rows:
-                role_id = int(row["role_id"])
                 leader_id = row["user_id"]
+                role_id_primary = row["role_id"]
+                role_id_secondary = row["role_id_2"]
                 ign_primary = row["ign_primary"]
                 ign_secondary = row["ign_secondary"]
-
-                # Get the Discord role
-                role = interaction.guild.get_role(role_id)
-                role_name = role.name if role else f"Unknown Role (ID: {role_id})"
 
                 try:
                     leader = await self.bot.fetch_user(int(leader_id))
@@ -47,23 +44,27 @@ class UnionInfo(commands.Cog):
                 except:
                     leader_display = f"**Unknown User**\n🆔 `{leader_id}`"
 
-                # Add IGN info if available with clear labels
-                ign_parts = []
-                if ign_primary:
-                    ign_parts.append(f"🎮 **IGN:** {ign_primary}")
-                if ign_secondary:
-                    ign_parts.append(f"🎯 **Alt IGN:** {ign_secondary}")
+                # Show leadership for each role they lead
+                leadership_info = []
                 
-                if ign_parts:
-                    ign_display = f"\n{chr(10).join(ign_parts)}"
-                else:
-                    ign_display = f"\n⚠️ *No IGN registered*"
-
-                embed.add_field(
-                    name=f"🏛️ **{role_name}**",
-                    value=f"{leader_display}{ign_display}\n\u200b",
-                    inline=False
-                )
+                if role_id_primary:
+                    role = interaction.guild.get_role(role_id_primary)
+                    role_name = role.name if role else f"Role ID: {role_id_primary}"
+                    primary_ign_display = f"🎮 **Primary IGN:** {ign_primary}" if ign_primary else "🎮 **Primary IGN:** *Not registered*"
+                    leadership_info.append(f"🏛️ **{role_name}**\n{leader_display}\n{primary_ign_display}")
+                
+                if role_id_secondary:
+                    role = interaction.guild.get_role(role_id_secondary)
+                    role_name = role.name if role else f"Role ID: {role_id_secondary}"
+                    secondary_ign_display = f"🎯 **Secondary IGN:** {ign_secondary}" if ign_secondary else "🎯 **Secondary IGN:** *Not registered*"
+                    leadership_info.append(f"🏛️ **{role_name}**\n{leader_display}\n{secondary_ign_display}")
+                
+                for info in leadership_info:
+                    embed.add_field(
+                        name="👑 **LEADERSHIP**",
+                        value=f"{info}\n\u200b",
+                        inline=False
+                    )
 
             # Add summary
             total_leaders = len(rows)
@@ -105,7 +106,7 @@ class UnionInfo(commands.Cog):
                 role_name = role.name if role else f"Unknown Role (ID: {role_id})"
 
                 # Get union leader
-                leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1", role_id)
+                leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", role_id)
                 leader_id = leader_row['user_id'] if leader_row else None
 
                 # Get all members - get both union slots to determine which IGN to show
