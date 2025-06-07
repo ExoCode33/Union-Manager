@@ -12,15 +12,12 @@ class UnionManagement(commands.Cog):
 
     async def find_user_by_ign(self, ign):
         """Find Discord user by their primary or secondary IGN"""
-        conn = await get_connection()
-        try:
+        async with get_connection() as conn:
             row = await conn.fetchrow(
                 "SELECT discord_id FROM users WHERE ign_primary = $1 OR ign_secondary = $1", 
                 ign
             )
             return row['discord_id'] if row else None
-        finally:
-            await conn.close()
 
     @app_commands.command(name="register_role_as_union", description="Register a Discord role as a union (Admin only)")
     @app_commands.describe(role="Discord role to register as union")
