@@ -21,8 +21,8 @@ class BasicCommands(commands.Cog):
             else:
                 # User doesn't exist, create new record with primary IGN
                 await conn.execute("""
-                    INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name)
-                    VALUES ($1, $2, $3, NULL, NULL)
+                    INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2)
+                    VALUES ($1, $2, $3, NULL, NULL, NULL)
                 """, str(username.id), username.display_name, ign)
 
             await interaction.response.send_message(
@@ -47,8 +47,8 @@ class BasicCommands(commands.Cog):
             else:
                 # User doesn't exist, create new record with secondary IGN
                 await conn.execute("""
-                    INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name)
-                    VALUES ($1, $2, NULL, $3, NULL)
+                    INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2)
+                    VALUES ($1, $2, NULL, $3, NULL, NULL)
                 """, str(username.id), username.display_name, ign)
 
             await interaction.response.send_message(
@@ -126,7 +126,7 @@ class BasicCommands(commands.Cog):
             # If found by Discord info, get their data
             if discord_user:
                 row = await conn.fetchrow(
-                    "SELECT ign_primary, ign_secondary, union_name FROM users WHERE discord_id = $1", 
+                    "SELECT ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE discord_id = $1", 
                     str(discord_user.id)
                 )
                 
@@ -135,26 +135,37 @@ class BasicCommands(commands.Cog):
                     response += f"**Primary IGN:** {row['ign_primary'] or 'Not registered'}\n"
                     response += f"**Secondary IGN:** {row['ign_secondary'] or 'Not registered'}\n"
                     
-                    # Convert union_name to role name if it's a role ID
-                    union_display = "Not assigned"
+                    # Handle dual unions
+                    unions = []
                     if row['union_name']:
                         try:
                             role_id = int(row['union_name'])
                             role = interaction.guild.get_role(role_id)
                             union_display = role.name if role else f"Role ID: {role_id}"
+                            unions.append(f"{union_display} (Primary IGN)")
                         except:
-                            union_display = row['union_name']
+                            unions.append(f"{row['union_name']} (Primary IGN)")
                     
-                    response += f"**Union:** {union_display}"
+                    if row['union_name_2']:
+                        try:
+                            role_id = int(row['union_name_2'])
+                            role = interaction.guild.get_role(role_id)
+                            union_display = role.name if role else f"Role ID: {role_id}"
+                            unions.append(f"{union_display} (Secondary IGN)")
+                        except:
+                            unions.append(f"{row['union_name_2']} (Secondary IGN)")
+                    
+                    union_text = " | ".join(unions) if unions else "Not assigned"
+                    response += f"**Unions:** {union_text}"
                 else:
-                    response += "**Primary IGN:** Not registered\n**Secondary IGN:** Not registered\n**Union:** Not assigned"
+                    response += "**Primary IGN:** Not registered\n**Secondary IGN:** Not registered\n**Unions:** Not assigned"
                 
                 await interaction.response.send_message(response)
                 return
             
             # If not found by Discord info, search by IGN
             rows = await conn.fetch(
-                "SELECT discord_id, ign_primary, ign_secondary, union_name FROM users WHERE ign_primary ILIKE $1 OR ign_secondary ILIKE $1", 
+                "SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE ign_primary ILIKE $1 OR ign_secondary ILIKE $1", 
                 f"%{query}%"
             )
             
@@ -178,21 +189,33 @@ class BasicCommands(commands.Cog):
                 elif row['ign_secondary'] and query.lower() in row['ign_secondary'].lower():
                     matched_ign = f"{row['ign_secondary']} (Secondary)"
                 
-                # Convert union_name to role name if it's a role ID
-                union_display = "Not assigned"
+                # Handle dual unions
+                unions = []
                 if row['union_name']:
                     try:
                         role_id = int(row['union_name'])
                         role = interaction.guild.get_role(role_id)
                         union_display = role.name if role else f"Role ID: {role_id}"
+                        unions.append(f"{union_display} (Primary)")
                     except:
-                        union_display = row['union_name']
+                        unions.append(f"{row['union_name']} (Primary)")
+                
+                if row['union_name_2']:
+                    try:
+                        role_id = int(row['union_name_2'])
+                        role = interaction.guild.get_role(role_id)
+                        union_display = role.name if role else f"Role ID: {role_id}"
+                        unions.append(f"{union_display} (Secondary)")
+                    except:
+                        unions.append(f"{row['union_name_2']} (Secondary)")
+                
+                union_text = " | ".join(unions) if unions else "Not assigned"
                 
                 response = f"**Matched IGN:** {matched_ign}\n"
                 response += f"**Discord:** {user_display}\n"
                 response += f"**Primary IGN:** {row['ign_primary'] or 'Not registered'}\n"
                 response += f"**Secondary IGN:** {row['ign_secondary'] or 'Not registered'}\n"
-                response += f"**Union:** {union_display}"
+                response += f"**Unions:** {union_text}"
                 
                 await interaction.response.send_message(response)
             else:
@@ -212,18 +235,30 @@ class BasicCommands(commands.Cog):
                     elif row['ign_secondary'] and query.lower() in row['ign_secondary'].lower():
                         matched_ign = row['ign_secondary']
                     
-                    # Convert union_name to role name if it's a role ID
-                    union_display = "None"
+                    # Handle dual unions for multiple results
+                    unions = []
                     if row['union_name']:
                         try:
                             role_id = int(row['union_name'])
                             role = interaction.guild.get_role(role_id)
                             union_display = role.name if role else f"Role ID: {role_id}"
+                            unions.append(union_display)
                         except:
-                            union_display = row['union_name']
+                            unions.append(row['union_name'])
+                    
+                    if row['union_name_2']:
+                        try:
+                            role_id = int(row['union_name_2'])
+                            role = interaction.guild.get_role(role_id)
+                            union_display = role.name if role else f"Role ID: {role_id}"
+                            unions.append(union_display)
+                        except:
+                            unions.append(row['union_name_2'])
+                    
+                    union_text = " | ".join(unions) if unions else "None"
                     
                     response += f"**{i+1}.** {user_display}\n"
-                    response += f"   IGN: {matched_ign} | Union: {union_display}\n\n"
+                    response += f"   IGN: {matched_ign} | Unions: {union_text}\n\n"
                 
                 if len(rows) > 5:
                     response += f"*... and {len(rows) - 5} more results*"
