@@ -11,7 +11,11 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def on_ready():
     print("🔄 Starting bot initialization...")
     
-    # ✅ Load all cog modules FIRST
+    # 🔄 Clear command cache FIRST, before loading anything
+    print("🔄 Clearing command cache...")
+    bot.tree.clear_commands(guild=None)
+    
+    # ✅ Load all cog modules AFTER clearing cache
     cog_modules = [
         "cogs.basic_commands",
         "cogs.union_management", 
@@ -25,17 +29,15 @@ async def on_ready():
             print(f"✅ Loaded {module}")
             
             # Check if commands were added to the tree
-            cog = bot.get_cog(module.split('.')[-1].replace('_', '').title().replace('Commands', 'Commands').replace('Management', 'Management').replace('Membership', 'Membership').replace('Info', 'Info'))
-            if not cog:
-                # Try different cog name patterns
-                possible_names = [
-                    'BasicCommands', 'UnionManagement', 'UnionMembership', 'UnionInfo',
-                    'Basic', 'Management', 'Membership', 'Info'
-                ]
-                for name in possible_names:
-                    cog = bot.get_cog(name)
-                    if cog:
-                        break
+            cog = bot.get_cog('BasicCommands')  # This was showing the wrong cog every time
+            if module == "cogs.basic_commands":
+                cog = bot.get_cog('BasicCommands')
+            elif module == "cogs.union_management":
+                cog = bot.get_cog('UnionManagement')
+            elif module == "cogs.union_membership":
+                cog = bot.get_cog('UnionMembership')
+            elif module == "cogs.union_info":
+                cog = bot.get_cog('UnionInfo')
             
             if cog:
                 app_commands = cog.get_app_commands()
@@ -51,20 +53,12 @@ async def on_ready():
     
     # Check total commands before sync
     total_commands = len(bot.tree.get_commands())
-    print(f"🌳 Total commands in tree before sync: {total_commands}")
+    print(f"🌳 Total commands in tree ready for sync: {total_commands}")
     
     # List all loaded cogs
     print(f"📁 Loaded cogs: {list(bot.cogs.keys())}")
     
-    # 🔄 Clear command cache AFTER loading cogs
-    print("🔄 Clearing command cache...")
-    bot.tree.clear_commands(guild=None)
-    
-    # Check commands after clearing
-    total_after_clear = len(bot.tree.get_commands())
-    print(f"🌳 Commands in tree after clear: {total_after_clear}")
-    
-    # 🔄 Sync commands
+    # 🔄 Sync commands (NO MORE CLEARING!)
     print("🔄 Syncing commands...")
     try:
         synced = await bot.tree.sync()
