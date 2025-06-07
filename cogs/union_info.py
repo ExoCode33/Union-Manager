@@ -25,11 +25,11 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(title="👑 Union Leaders", color=0x00ff00)
 
             for row in rows:
-                role_id = row["role_id"]
+                role_id_str = str(row["role_id"])
                 user_id = row["user_id"]
 
-                role = interaction.guild.get_role(int(role_id))
-                role_name = role.name if role else f"(Role ID: {role_id})"
+                role = interaction.guild.get_role(int(role_id_str))
+                role_name = role.name if role else f"(Role ID: {role_id_str})"
 
                 try:
                     leader = await self.bot.fetch_user(int(user_id))
@@ -63,10 +63,10 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(title="🏛️ Union Details", color=0x0099ff)
 
             for row in unions:
-                role_id = row['role_id']
-                role_id_str = str(role_id)  # cast to string for PostgreSQL
-                role = interaction.guild.get_role(int(role_id))
-                role_name = role.name if role else f"(Role ID: {role_id})"
+                role_id_str = str(row['role_id'])       # for SQL
+                role_id_int = int(row['role_id'])       # for Discord
+                role = interaction.guild.get_role(role_id_int)
+                role_name = role.name if role else f"(Role ID: {role_id_str})"
 
                 leader_row = await conn.fetchrow(
                     "SELECT user_id FROM union_leaders WHERE role_id = $1", role_id_str
