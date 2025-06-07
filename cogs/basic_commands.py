@@ -1,32 +1,25 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import sqlite3
+from utils.db import get_connection  # asyncpg connection
 
 class BasicCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def get_connection(self):
-        conn = sqlite3.connect("database.db")
-        conn.row_factory = sqlite3.Row
-        return conn
-
     @app_commands.command(name="register_ign", description="Register a user's primary in-game name")
     @app_commands.describe(username="Discord username", ign="Primary in-game name")
     async def register_ign(self, interaction: discord.Interaction, username: discord.Member, ign: str):
-        conn = self.get_connection()
+        conn = await get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("""
+            await conn.execute("""
                 INSERT INTO users (discord_id, ign_primary, ign_secondary, union_name)
-                VALUES (?, ?, 
-                        (SELECT ign_secondary FROM users WHERE discord_id = ?),
-                        (SELECT union_name FROM users WHERE discord_id = ?))
+                VALUES ($1, $2,
+                        (SELECT ign_secondary FROM users WHERE discord_id = $1),
+                        (SELECT union_name FROM users WHERE discord_id = $1))
                 ON CONFLICT (discord_id) DO UPDATE
-                SET ign_primary = excluded.ign_primary
-            """, (str(username.id), ign, str(username.id), str(username.id)))
-            conn.commit()
+                SET ign_primary = EXCLUDED.ign_primary
+            """, str(username.id), ign)
 
             await interaction.response.send_message(
                 f"✅ Primary IGN for {username.mention} ({username.name}) set to **{ign}**", ephemeral=True
@@ -34,24 +27,22 @@ class BasicCommands(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"❌ Error registering primary IGN: {str(e)}", ephemeral=True)
         finally:
-            conn.close()
+            await conn.close()
 
     @app_commands.command(name="register_secondary_ign", description="Register a user's secondary in-game name")
     @app_commands.describe(username="Discord username", ign="Secondary in-game name")
     async def register_secondary_ign(self, interaction: discord.Interaction, username: discord.Member, ign: str):
-        conn = self.get_connection()
+        conn = await get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("""
+            await conn.execute("""
                 INSERT INTO users (discord_id, ign_primary, ign_secondary, union_name)
-                VALUES (?,
-                        (SELECT ign_primary FROM users WHERE discord_id = ?),
-                        ?, 
-                        (SELECT union_name FROM users WHERE discord_id = ?))
+                VALUES ($1,
+                        (SELECT ign_primary FROM users WHERE discord_id = $1),
+                        $2,
+                        (SELECT union_name FROM users WHERE discord_id = $1))
                 ON CONFLICT (discord_id) DO UPDATE
-                SET ign_secondary = excluded.ign_secondary
-            """, (str(username.id), str(username.id), ign, str(username.id)))
-            conn.commit()
+                SET ign_secondary = EXCLUDED.ign_secondary
+            """, str(username.id), ign)
 
             await interaction.response.send_message(
                 f"✅ Secondary IGN for {username.mention} ({username.name}) set to **{ign}**", ephemeral=True
@@ -59,18 +50,15 @@ class BasicCommands(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"❌ Error registering secondary IGN: {str(e)}", ephemeral=True)
         finally:
-            conn.close()
+            await conn.close()
 
     @app_commands.command(name="deregister_ign", description="Remove a user's primary IGN registration")
     @app_commands.describe(username="Discord username")
     async def deregister_ign(self, interaction: discord.Interaction, username: discord.Member):
-        conn = self.get_connection()
+        conn = await get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("UPDATE users SET ign_primary = NULL WHERE discord_id = ?", (str(username.id),))
-            conn.commit()
-            
-            if cursor.rowcount > 0:
+            result = await conn.execute("UPDATE users SET ign_primary = NULL WHERE discord_id = $1", str(username.id))
+            if result and "UPDATE 1" in result:
                 await interaction.response.send_message(
                     f"✅ Primary IGN for {username.mention} ({username.name}) has been removed", ephemeral=True
                 )
@@ -81,18 +69,15 @@ class BasicCommands(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"❌ Error removing primary IGN: {str(e)}", ephemeral=True)
         finally:
-            conn.close()
+            await conn.close()
 
     @app_commands.command(name="deregister_secondary_ign", description="Remove a user's secondary IGN registration")
     @app_commands.describe(username="Discord username")
     async def deregister_secondary_ign(self, interaction: discord.Interaction, username: discord.Member):
-        conn = self.get_connection()
+        conn = await get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("UPDATE users SET ign_secondary = NULL WHERE discord_id = ?", (str(username.id),))
-            conn.commit()
-            
-            if cursor.rowcount > 0:
+            result = await conn.execute("UPDATE users SET ign_secondary = NULL WHERE discord_id = $1", str(username.id))
+            if result and "UPDATE 1" in result:
                 await interaction.response.send_message(
                     f"✅ Secondary IGN for {username.mention} ({username.name}) has been removed", ephemeral=True
                 )
@@ -103,15 +88,13 @@ class BasicCommands(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"❌ Error removing secondary IGN: {str(e)}", ephemeral=True)
         finally:
-            conn.close()
+            await conn.close()
 
     @app_commands.command(name="search_user", description="Search for a user by Discord name, username, ID, or IGN")
     @app_commands.describe(query="Discord name, username, ID, or IGN to search for")
     async def search_user(self, interaction: discord.Interaction, query: str):
-        conn = self.get_connection()
+        conn = await get_connection()
         try:
-            cursor = conn.cursor()
-            
             # First try to find by Discord ID (if query is numeric)
             discord_user = None
             if query.isdigit():
@@ -135,17 +118,27 @@ class BasicCommands(commands.Cog):
             
             # If found by Discord info, get their data
             if discord_user:
-                cursor.execute(
-                    "SELECT ign_primary, ign_secondary, union_name FROM users WHERE discord_id = ?", 
-                    (str(discord_user.id),)
+                row = await conn.fetchrow(
+                    "SELECT ign_primary, ign_secondary, union_name FROM users WHERE discord_id = $1", 
+                    str(discord_user.id)
                 )
-                row = cursor.fetchone()
                 
                 response = f"**Discord:** {discord_user.mention} ({discord_user.name})\n"
                 if row:
                     response += f"**Primary IGN:** {row['ign_primary'] or 'Not registered'}\n"
                     response += f"**Secondary IGN:** {row['ign_secondary'] or 'Not registered'}\n"
-                    response += f"**Union:** {row['union_name'] or 'Not assigned'}"
+                    
+                    # Convert union_name to role name if it's a role ID
+                    union_display = "Not assigned"
+                    if row['union_name']:
+                        try:
+                            role_id = int(row['union_name'])
+                            role = interaction.guild.get_role(role_id)
+                            union_display = role.name if role else f"Role ID: {role_id}"
+                        except:
+                            union_display = row['union_name']
+                    
+                    response += f"**Union:** {union_display}"
                 else:
                     response += "**Primary IGN:** Not registered\n**Secondary IGN:** Not registered\n**Union:** Not assigned"
                 
@@ -153,11 +146,10 @@ class BasicCommands(commands.Cog):
                 return
             
             # If not found by Discord info, search by IGN
-            cursor.execute(
-                "SELECT discord_id, ign_primary, ign_secondary, union_name FROM users WHERE ign_primary LIKE ? OR ign_secondary LIKE ?", 
-                (f"%{query}%", f"%{query}%")
+            rows = await conn.fetch(
+                "SELECT discord_id, ign_primary, ign_secondary, union_name FROM users WHERE ign_primary ILIKE $1 OR ign_secondary ILIKE $1", 
+                f"%{query}%"
             )
-            rows = cursor.fetchall()
             
             if not rows:
                 await interaction.response.send_message(f"❌ No user found matching **{query}**")
@@ -179,11 +171,21 @@ class BasicCommands(commands.Cog):
                 elif row['ign_secondary'] and query.lower() in row['ign_secondary'].lower():
                     matched_ign = f"{row['ign_secondary']} (Secondary)"
                 
+                # Convert union_name to role name if it's a role ID
+                union_display = "Not assigned"
+                if row['union_name']:
+                    try:
+                        role_id = int(row['union_name'])
+                        role = interaction.guild.get_role(role_id)
+                        union_display = role.name if role else f"Role ID: {role_id}"
+                    except:
+                        union_display = row['union_name']
+                
                 response = f"**Matched IGN:** {matched_ign}\n"
                 response += f"**Discord:** {user_display}\n"
                 response += f"**Primary IGN:** {row['ign_primary'] or 'Not registered'}\n"
                 response += f"**Secondary IGN:** {row['ign_secondary'] or 'Not registered'}\n"
-                response += f"**Union:** {row['union_name'] or 'Not assigned'}"
+                response += f"**Union:** {union_display}"
                 
                 await interaction.response.send_message(response)
             else:
@@ -203,8 +205,18 @@ class BasicCommands(commands.Cog):
                     elif row['ign_secondary'] and query.lower() in row['ign_secondary'].lower():
                         matched_ign = row['ign_secondary']
                     
+                    # Convert union_name to role name if it's a role ID
+                    union_display = "None"
+                    if row['union_name']:
+                        try:
+                            role_id = int(row['union_name'])
+                            role = interaction.guild.get_role(role_id)
+                            union_display = role.name if role else f"Role ID: {role_id}"
+                        except:
+                            union_display = row['union_name']
+                    
                     response += f"**{i+1}.** {user_display}\n"
-                    response += f"   IGN: {matched_ign} | Union: {row['union_name'] or 'None'}\n\n"
+                    response += f"   IGN: {matched_ign} | Union: {union_display}\n\n"
                 
                 if len(rows) > 5:
                     response += f"*... and {len(rows) - 5} more results*"
@@ -214,7 +226,7 @@ class BasicCommands(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"❌ Error searching user: {str(e)}", ephemeral=True)
         finally:
-            conn.close()
+            await conn.close()
 
 async def setup(bot):
     await bot.add_cog(BasicCommands(bot))
