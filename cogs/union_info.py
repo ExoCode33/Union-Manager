@@ -1,30 +1,23 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import sqlite3
+from utils.db import get_connection  # Uses asyncpg
 
 class UnionInfo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def get_connection(self):
-        conn = sqlite3.connect("database.db")
-        conn.row_factory = sqlite3.Row
-        return conn
-
     @app_commands.command(name="show_union_leader", description="Show all union leaders and their assignments")
     async def show_union_leader(self, interaction: discord.Interaction):
-        conn = self.get_connection()
+        conn = await get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT ul.role_name, ul.leader_id, u.ign_primary, u.ign_secondary
+            rows = await conn.fetch("""
+                SELECT ul.role_id, ul.leader_id, u.ign_primary, u.ign_secondary
                 FROM union_leaders ul
-                JOIN union_roles ur ON ul.role_name = ur.role_name
+                JOIN union_roles ur ON ul.role_id = ur.role_id
                 LEFT JOIN users u ON ul.leader_id = u.discord_id
-                ORDER BY ul.role_name
+                ORDER BY ul.role_id
             """)
-            rows = cursor.fetchall()
 
             if not rows:
                 await interaction.response.send_message("❌ No union leaders found.")
@@ -33,10 +26,14 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(title="👑 Union Leaders", color=0x00ff00)
 
             for row in rows:
-                role_name = row["role_name"]
+                role_id = int(row["role_id"])
                 leader_id = row["leader_id"]
                 ign_primary = row["ign_primary"]
                 ign_secondary = row["ign_secondary"]
+
+                # Get the Discord role
+                role = interaction.guild.get_role(role_id)
+                role_name = role.name if role else f"Unknown Role (ID: {role_id})"
 
                 try:
                     leader = await self.bot.fetch_user(int(leader_id))
@@ -64,15 +61,13 @@ class UnionInfo(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
         finally:
-            conn.close()
+            await conn.close()
 
     @app_commands.command(name="show_union_detail", description="Show all unions with member lists and crown emojis")
     async def show_union_detail(self, interaction: discord.Interaction):
-        conn = self.get_connection()
+        conn = await get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT role_name FROM union_roles ORDER BY role_name")
-            unions = cursor.fetchall()
+            unions = await conn.fetch("SELECT role_id FROM union_roles ORDER BY role_id")
 
             if not unions:
                 await interaction.response.send_message("❌ No unions found.")
@@ -81,21 +76,23 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(title="🏛️ Union Details", color=0x0099ff)
 
             for union_row in unions:
-                role_name = union_row['role_name']
+                role_id = int(union_row['role_id'])
+                
+                # Get the Discord role
+                role = interaction.guild.get_role(role_id)
+                role_name = role.name if role else f"Unknown Role (ID: {role_id})"
 
                 # Get union leader
-                cursor.execute("SELECT leader_id FROM union_leaders WHERE role_name = ?", (role_name,))
-                leader_row = cursor.fetchone()
+                leader_row = await conn.fetchrow("SELECT leader_id FROM union_leaders WHERE role_id = $1", role_id)
                 leader_id = leader_row['leader_id'] if leader_row else None
 
-                # Get all members
-                cursor.execute("""
+                # Get all members - need to match by role_id converted to string for union_name
+                members = await conn.fetch("""
                     SELECT discord_id, ign_primary, ign_secondary
                     FROM users
-                    WHERE union_name = ?
+                    WHERE union_name = $1
                     ORDER BY discord_id
-                """, (role_name,))
-                members = cursor.fetchall()
+                """, str(role_id))
 
                 if not members:
                     member_list = "No members"
@@ -134,7 +131,7 @@ class UnionInfo(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
         finally:
-            conn.close()
+            await conn.close()
 
 async def setup(bot):
     await bot.add_cog(UnionInfo(bot))
