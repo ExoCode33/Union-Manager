@@ -1,14 +1,15 @@
 # Discord Union Bot
 
-A modular, slash-command Discord bot to manage IGN assignments and union roles with comprehensive member management features.
+A modular, slash-command Discord bot to manage dual IGN assignments and union roles with comprehensive member management features.
 
 ## Features
 
-- **13 Slash Commands** organized across 4 modules
+- **15 Slash Commands** organized across 4 modules
+- **Dual IGN Support** (Primary and Secondary in-game names)
 - **Role-based Permissions** (Admin and Union Leader restrictions)
 - **Auto-detection System** for union leaders
 - **Real-time Member Tracking** with crown emojis for leaders
-- **IGN Management** system
+- **Dual IGN Management** system
 - **SQLite Persistent Storage**
 - **Railway-ready Deployment**
 
@@ -40,8 +41,10 @@ discord-union-bot/
 ### 📝 Basic Commands (`basic_commands.py`)
 | Command | Description | Permissions |
 |---------|-------------|-------------|
-| `/register_ign` | Register a user's in-game name | Anyone |
-| `/deregister_ign` | Remove a user's IGN registration | Anyone |
+| `/register_ign` | Register a user's primary in-game name | Anyone |
+| `/register_secondary_ign` | Register a user's secondary in-game name | Anyone |
+| `/deregister_ign` | Remove a user's primary IGN registration | Anyone |
+| `/deregister_secondary_ign` | Remove a user's secondary IGN registration | Anyone |
 | `/search_user` | Search for a user by Discord username | Anyone |
 
 ### ⚙️ Union Management (`union_management.py`)
@@ -66,6 +69,30 @@ discord-union-bot/
 | `/show_union_leader` | Show all union leaders and their assignments | Anyone |
 | `/show_union_detail` | Show all unions with member lists and crown emojis 👑 | Anyone |
 
+## Dual IGN System
+
+### **Primary and Secondary IGNs**
+- Each user can register **two in-game names**
+- Primary IGN for main account
+- Secondary IGN for alternate account
+- Both IGNs are preserved when joining/leaving unions
+- Display format: `@User (PrimaryIGN | SecondaryIGN)`
+
+### **IGN Management**
+```
+/register_ign username:Player ign:MainAccount
+# ✅ Primary IGN for Player set to MainAccount
+
+/register_secondary_ign username:Player ign:AltAccount
+# ✅ Secondary IGN for Player set to AltAccount
+
+/search_user username:Player
+# Discord: @Player (player_discord)
+# Primary IGN: MainAccount
+# Secondary IGN: AltAccount
+# Union: Union-ZoxCrusaders
+```
+
 ## Permission System
 
 ### **Union Leaders**
@@ -79,7 +106,7 @@ discord-union-bot/
 - Override commands clearly marked with "(Admin override)"
 
 ### **Regular Users**
-- Can register/search IGNs
+- Can register/search dual IGNs
 - Can view union information
 - Cannot manage union membership
 
@@ -93,24 +120,40 @@ discord-union-bot/
 - Union leaders display with crown emoji (👑) in `/show_union_detail`
 - Clear distinction between leaders and members
 
-### 🔒 **Security**
+### 🔒 **Security & Privacy**
 - Role-based permissions prevent unauthorized access
+- Most commands are ephemeral (only visible to command user)
+- Public commands: `/search_user`, `/show_union_leader`, `/show_union_detail`
 - Admin overrides are clearly logged
-- Database validation ensures data integrity
 
 ### 📱 **User-Friendly Interface**
 - Username autocomplete for easy member selection
 - Clear error messages with helpful suggestions
-- Public responses for transparency
+- Dual IGN display with pipe separator (`Primary | Secondary`)
 
 ## Database Schema
 
 The bot uses SQLite with the following tables:
-- `users` - Stores Discord users, IGNs, and union assignments
+- `users` - Stores Discord users, dual IGNs, and union assignments
 - `union_roles` - Registered union role IDs
 - `union_leaders` - Union leader assignments
 
 ## Example Usage
+
+### For Dual IGN Management:
+```
+/register_ign username:Player ign:MainAccount
+# ✅ Primary IGN for Player set to MainAccount
+
+/register_secondary_ign username:Player ign:AltAccount  
+# ✅ Secondary IGN for Player set to AltAccount
+
+/search_user username:Player
+# Discord: @Player (player_discord)
+# Primary IGN: MainAccount
+# Secondary IGN: AltAccount
+# Union: Union-ZoxCrusaders
+```
 
 ### For Union Leaders:
 ```
@@ -121,29 +164,22 @@ The bot uses SQLite with the following tables:
 # ✅ @OldMember removed from your union Union-ZoxCrusaders
 ```
 
-### For Admins:
+### For Union Display:
 ```
-/admin_add_user_to_union username:Player role:Union-ZoxFam
-# ✅ @Player added to union Union-ZoxFam (Admin override)
-
 /show_union_detail
-# Shows all unions with member lists and crown emojis for leaders
-```
-
-### For Everyone:
-```
-/register_ign username:Player ign:CoolPlayer123
-# ✅ IGN for Player (player_discord) set to CoolPlayer123
-
-/search_user username:Player
-# Discord: Player (player_discord)
-# IGN: CoolPlayer123
+# 🏛️ Union Details
+# 
+# Union-ZoxCrusaders
+# 👑 @Leader (LeaderIGN | LeaderAlt)
+# @Member1 (MainIGN | AltIGN)
+# @Member2 (OnlyMain)
+# @Member3 (Main | Alt)
 ```
 
 ## Installation Files
 
 Download these 4 files and place them in your `cogs/` directory:
-1. **basic_commands.py** - IGN and user management
+1. **basic_commands.py** - Dual IGN and user management
 2. **union_management.py** - Union and leader setup  
 3. **union_membership.py** - Member add/remove functionality
 4. **union_info.py** - Information display commands
@@ -154,7 +190,8 @@ Download these 4 files and place them in your `cogs/` directory:
 - Compatible with Discord.py 2.0+
 - Designed for Railway deployment
 - Modular architecture for easy maintenance
+- Dual IGN system with primary/secondary support
 
 ---
 
-*Built for managing gaming unions with Discord integration*
+*Built for managing gaming unions with Discord integration and dual account support*
