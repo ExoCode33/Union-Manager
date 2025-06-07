@@ -99,7 +99,7 @@ class UnionManagement(commands.Cog):
                 INSERT INTO union_leaders (role_id, user_id)
                 VALUES ($1, $2)
                 ON CONFLICT (role_id) DO UPDATE SET user_id = EXCLUDED.user_id
-            """, role.id, discord_id)
+            """, role.id, int(discord_id))
 
             await interaction.response.send_message(
                 f"✅ **{ign}** ({user_display}) appointed as leader of **{role.name}**", 
@@ -135,7 +135,7 @@ class UnionManagement(commands.Cog):
                 await interaction.response.send_message(f"❌ No leader found for **{role.name}**", ephemeral=True)
                 return
                 
-            if current_leader['user_id'] != discord_id:
+            if current_leader['user_id'] != int(discord_id):
                 await interaction.response.send_message(
                     f"❌ **{ign}** is not the leader of **{role.name}**", 
                     ephemeral=True
@@ -150,7 +150,7 @@ class UnionManagement(commands.Cog):
                 user_display = f"User ID: {discord_id}"
 
             # Remove the leader
-            await conn.execute("DELETE FROM union_leaders WHERE role_id = $1 AND user_id = $2", role.id, discord_id)
+            await conn.execute("DELETE FROM union_leaders WHERE role_id = $1 AND user_id = $2", role.id, int(discord_id))
             
             await interaction.response.send_message(
                 f"✅ **{ign}** ({user_display}) dismissed as leader of **{role.name}**", 
