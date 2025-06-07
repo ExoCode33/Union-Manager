@@ -1,175 +1,73 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
-from utils.db import get_connection
+from discord import app_commands
+import sqlite3
 
 class BasicCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    
-    async def username_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        """Autocomplete for username parameters"""
-        if not current:
-            # Show first 25 members if nothing is typed
-            members = list(interaction.guild.members)[:25]
-        else:
-            # Filter members based on what's being typed
-            current_lower = current.lower()
-            members = [
-                member for member in interaction.guild.members
-                if (current_lower in member.name.lower() or 
-                    current_lower in member.display_name.lower())
-            ][:25]  # Limit to 25 results
-        
-        return [
-            app_commands.Choice(name=f"{member.display_name} ({member.name})", value=member.name)
-            for member in members
-        ]
-    
-    def find_user_by_name(self, guild: discord.Guild, username: str) -> discord.Member:
-        """Find a user in the guild by their username or display name"""
-        username_lower = username.lower()
-        
-        # First try exact match on username
-        for member in guild.members:
-            if member.name.lower() == username_lower:
-                return member
-        
-        # Then try exact match on display name
-        for member in guild.members:
-            if member.display_name.lower() == username_lower:
-                return member
-        
-        # Finally try partial match on either name
-        for member in guild.members:
-            if (username_lower in member.name.lower() or 
-                username_lower in member.display_name.lower()):
-                return member
-        
-        return None
 
-    def extract_user_id(self, discord_id: str) -> int:
-        """Extract user ID from Discord mention or plain ID string"""
-        # Remove <@ and > from mentions, handle both <@123> and <@!123> formats
-        if discord_id.startswith('<@'):
-            discord_id = discord_id.strip('<@!>')
-        return int(discord_id)
+    def get_db_connection(self):
+        return sqlite3.connect("database.db")
 
-    # /register_ign
-    @app_commands.command(name="register_ign", description="Register a user's IGN")
-    @app_commands.describe(username="The Discord username of the user", ign="The IGN to register")
-    @app_commands.autocomplete(username=username_autocomplete)
-    async def register_ign(self, interaction: discord.Interaction, username: str, ign: str):
-        # First try to find user by name
-        user = self.find_user_by_name(interaction.guild, username)
+    @app_commands.command(name="register_ign", description="Register a user's in-game name")
+    @app_commands.describe(username="Discord username", ign="In-game name")
+    async def register_ign(self, interaction: discord.Interaction, username: discord.Member, ign: str):
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
         
-        if not user:
-            # If not found by name, try to parse as ID/mention
-            try:
-                user_id = self.extract_user_id(username)
-                try:
-                    user = await interaction.guild.fetch_member(user_id)
-                except:
-                    await interaction.response.send_message(f"❌ User not found: `{username}`")
-                    return
-            except ValueError:
-                await interaction.response.send_message(f"❌ User not found: `{username}`")
-                return
-        
-        user_display = f"{user.display_name} ({user.name})"
-        
-        conn = await get_connection()
         try:
-            # Insert or update user with both IGN and username
-            await conn.execute(
-                "INSERT INTO users (username, user_id, ign) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET username = $1, ign = $3",
-                user.name, user.id, ign
-            )
+            cursor.execute("INSERT OR REPLACE INTO users (discord_id, ign, union_name) VALUES (?, ?, COALESCE((SELECT union_name FROM users WHERE discord_id = ?), NULL))", 
+                         (str(username.id), ign, str(username.id)))
+            conn.commit()
+            await interaction.response.send_message(f"✅
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error registering IGN: {str(e)}", ephemeral=True)
         finally:
-            await conn.close()
-        
-        await interaction.response.send_message(f"✅ IGN for **{user_display}** set to `{ign}`")
+            conn.close()
 
-    # /deregister_ign
     @app_commands.command(name="deregister_ign", description="Remove a user's IGN registration")
-    @app_commands.describe(username="The Discord username of the user")
-    @app_commands.autocomplete(username=username_autocomplete)
-    async def deregister_ign(self, interaction: discord.Interaction, username: str):
-        # First try to find user by name
-        user = self.find_user_by_name(interaction.guild, username)
+    @app_commands.describe(username="Discord username")
+    async def deregister_ign(self, interaction: discord.Interaction, username: discord.Member):
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
         
-        if not user:
-            # If not found by name, try to parse as ID/mention
-            try:
-                user_id = self.extract_user_id(username)
-                try:
-                    user = await interaction.guild.fetch_member(user_id)
-                except:
-                    await interaction.response.send_message(f"❌ User not found: `{username}`")
-                    return
-            except ValueError:
-                await interaction.response.send_message(f"❌ User not found: `{username}`")
-                return
-        
-        user_display = f"{user.display_name} ({user.name})"
-        
-        conn = await get_connection()
         try:
-            # Check if user exists in database
-            user_data = await conn.fetchrow("SELECT username, ign FROM users WHERE user_id = $1", user.id)
-            if not user_data or not user_data['ign']:
-                await interaction.response.send_message(f"⚠️ **{user_display}** has no IGN registered.")
-                return
-            
-            # Remove IGN but keep other data
-            await conn.execute("UPDATE users SET ign = NULL WHERE user_id = $1", user.id)
+            cursor.execute("UPDATE users SET ign = NULL WHERE discord_id = ?", (str(username.id),))
+            if cursor.rowcount > 0:
+                conn.commit()
+                await interaction.response.send_message(f"✅ IGN for {username.mention} ({username.name}) has been removed", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ No IGN found for {username.mention}", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error removing IGN: {str(e)}", ephemeral=True)
         finally:
-            await conn.close()
-        
-        await interaction.response.send_message(f"✅ IGN removed for **{user_display}**")
+            conn.close()
 
-    # /search_user
     @app_commands.command(name="search_user", description="Search for a user by Discord username")
-    @app_commands.describe(username="The Discord username of the user to search")
-    @app_commands.autocomplete(username=username_autocomplete)
-    async def search_user(self, interaction: discord.Interaction, username: str):
-        # First try to find user by name
-        user = self.find_user_by_name(interaction.guild, username)
+    @app_commands.describe(username="Discord username to search for")
+    async def search_user(self, interaction: discord.Interaction, username: discord.Member):
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
         
-        if not user:
-            # If not found by name, try to parse as ID/mention
-            try:
-                user_id = self.extract_user_id(username)
-                try:
-                    user = await interaction.guild.fetch_member(user_id)
-                except:
-                    await interaction.response.send_message(f"❌ User not found: `{username}`")
-                    return
-            except ValueError:
-                await interaction.response.send_message(f"❌ User not found: `{username}`")
-                return
-        
-        user_display = f"{user.display_name} ({user.name})"
-        
-        conn = await get_connection()
         try:
-            user_data = await conn.fetchrow("SELECT username, ign FROM users WHERE user_id = $1", user.id)
-        finally:
-            await conn.close()
-
-        if user_data:
-            # Update username if it's different (in case user changed their username)
-            if user_data['username'] != user.name:
-                conn = await get_connection()
-                try:
-                    await conn.execute("UPDATE users SET username = $1 WHERE user_id = $2", user.name, user.id)
-                finally:
-                    await conn.close()
+            cursor.execute("SELECT ign_primary, ign_secondary, union_name FROM users WHERE discord_id = ?", (str(username.id),))
+            result = cursor.fetchone()
             
-            await interaction.response.send_message(f"**Discord:** {user_display}\n**IGN:** `{user_data['ign']}`")
-        else:
-            await interaction.response.send_message(f"⚠️ No IGN found for **{user_display}**.")
+            if result:
+                ign_primary, ign_secondary, union_name = result
+                response = f"**Discord:** {username.mention} ({username.name})\n"
+                response += f"**Primary IGN:** {ign_primary if ign_primary else 'Not registered'}\n"
+                response += f"**Secondary IGN:** {ign_secondary if ign_secondary else 'Not registered'}\n"
+                response += f"**Union:** {union_name if union_name else 'Not assigned'}"
+            else:
+                response = f"**Discord:** {username.mention} ({username.name})\n**Primary IGN:** Not registered\n**Secondary IGN:** Not registered\n**Union:** Not assigned"
+            
+            await interaction.response.send_message(response)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error searching user: {str(e)}")
+        finally:
+            conn.close()
 
-
-async def setup(bot: commands.Bot):
+async def setup(bot):
     await bot.add_cog(BasicCommands(bot))
