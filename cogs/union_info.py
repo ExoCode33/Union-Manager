@@ -1,7 +1,7 @@
-# Checkimport discord
+import discord
 from discord.ext import commands
 from discord import app_commands
-from utils.db import get_connection  # Uses asyncpg
+from utils.db import get_connection
 
 class UnionInfo(commands.Cog):
     def __init__(self, bot):
@@ -26,7 +26,7 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(
                 title="👑 **UNION LEADERSHIP**", 
                 description="*All appointed union leaders with their IGN information*",
-                color=0xFFD700  # Gold color for leadership
+                color=0xFFD700
             )
             embed.set_footer(text="Use /appoint_union_leader to assign new leaders")
 
@@ -93,7 +93,7 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(
                 title="🏛️ **UNION OVERVIEW**", 
                 description="*Complete list of all registered unions with their leaders and members*",
-                color=0x2B2D31  # Discord dark theme color
+                color=0x2B2D31
             )
             embed.set_footer(text="👑 = Union Leader | Use /add_user_to_union to add members")
 
@@ -108,7 +108,7 @@ class UnionInfo(commands.Cog):
                 leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1", role_id)
                 leader_id = leader_row['user_id'] if leader_row else None
 
-                # Get all members - need to match by role_id converted to string for union_name
+                # Get all members
                 members = await conn.fetch("""
                     SELECT discord_id, ign_primary, ign_secondary
                     FROM users
@@ -116,7 +116,7 @@ class UnionInfo(commands.Cog):
                     ORDER BY discord_id
                 """, str(role_id))
 
-                # Count total members (including leader if they're in the members table)
+                # Count total members
                 member_count = len(members)
                 
                 # Check if leader exists but isn't in members table
@@ -124,16 +124,14 @@ class UnionInfo(commands.Cog):
                 if leader_id:
                     leader_in_members = any(str(member['discord_id']) == str(leader_id) for member in members)
                     if not leader_in_members:
-                        member_count += 1  # Add 1 for the leader
+                        member_count += 1
 
                 if member_count == 0:
                     if leader_id:
-                        # Show leader even if no other members
                         try:
                             leader_user = await self.bot.fetch_user(int(leader_id))
                             discord_name = leader_user.display_name
                             
-                            # Try to get leader's IGNs
                             leader_igns = await conn.fetchrow(
                                 "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
                                 leader_id
@@ -149,7 +147,7 @@ class UnionInfo(commands.Cog):
                             else:
                                 leader_display = f"**{discord_name}** ~ IGN: *Not registered*"
                             
-                            member_list = f"　👑 **{leader_display}**\n\n　　*No other members*"
+                            member_list = f"　👑 {leader_display}\n\n　　*No other members*"
                             member_count = 1
                         except:
                             member_list = f"　👑 **Unknown Leader**\n\n　　*No other members*"
@@ -189,7 +187,7 @@ class UnionInfo(commands.Cog):
 
                         # Check if this user is the leader
                         if leader_id and str(discord_id) == str(leader_id):
-                            leader_entry = f"　👑 **{full_display}**"
+                            leader_entry = f"　👑 {full_display}"
                         else:
                             member_entries.append(f"　👤 {full_display}")
                     
@@ -201,7 +199,6 @@ class UnionInfo(commands.Cog):
                         except:
                             discord_name = f"Unknown User (ID: {leader_id})"
                         
-                        # Try to get leader's IGNs
                         leader_igns = await conn.fetchrow(
                             "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
                             leader_id
@@ -216,7 +213,7 @@ class UnionInfo(commands.Cog):
                         ign_display = ' | '.join(ign_parts) if ign_parts else "*Not registered*"
                         leader_entry = f"　👑 **{discord_name}** ~ IGN: *{ign_display}*"
 
-                    # Combine leader (always first) + members - each on separate line with explicit breaks
+                    # Combine leader (always first) + members
                     all_entries = []
                     if leader_entry:
                         all_entries.append(leader_entry)
@@ -224,21 +221,18 @@ class UnionInfo(commands.Cog):
                     
                     member_list = "\n".join(all_entries)
 
-                # Add field with member capacity in the title - bigger and bolder union name
+                # Add field with member capacity
                 embed.add_field(
                     name=f"# **{role_name}** ({member_count}/30 members)", 
                     value=f"{member_list}",
                     inline=False
                 )
 
-            # Add summary at the bottom with Discord ID ~ IGN format
+            # Add summary
             total_unions = len(unions)
             unions_with_leaders = await conn.fetchval("SELECT COUNT(*) FROM union_leaders")
-            
-            # Get total members across all unions
             total_members = await conn.fetchval("SELECT COUNT(*) FROM users WHERE union_name IS NOT NULL")
             
-            # Get the user who triggered the command for the summary example
             try:
                 command_user = interaction.user
                 user_data = await conn.fetchrow(
@@ -247,13 +241,12 @@ class UnionInfo(commands.Cog):
                 )
                 
                 if user_data and (user_data['ign_primary'] or user_data['ign_secondary']):
-                    # Show primary IGN, or secondary if no primary
                     user_ign = user_data['ign_primary'] or user_data['ign_secondary']
-                    summary_example = f"Discord ID {command_user.display_name} ~ IGN {user_ign}"
+                    summary_example = f"**{command_user.display_name}** ~ IGN: *{user_ign}*"
                 else:
-                    summary_example = f"Discord ID {command_user.display_name} ~ IGN *Not registered*"
+                    summary_example = f"**{command_user.display_name}** ~ IGN: *Not registered*"
             except:
-                summary_example = "Discord ID ExoCode ~ IGN ExoCode#Test"
+                summary_example = "**ExoCode** ~ IGN: *ExoCode#Test*"
             
             embed.add_field(
                 name="📊 **SUMMARY**",
