@@ -146,9 +146,9 @@ class UnionMembership(commands.Cog):
         finally:
             await conn.close()
 
-    @app_commands.command(name="admin_add_user_to_union", description="Add user to ANY union (Admin override)")
-    @app_commands.describe(username="User to add", role="Union role to add them to")
-    async def admin_add_user_to_union(self, interaction: discord.Interaction, username: discord.Member, role: discord.Role):
+    @app_commands.command(name="admin_add_user_to_union", description="Add user to ANY union by IGN (Admin override)")
+    @app_commands.describe(ign="In-game name of the user to add", role="Union role to add them to")
+    async def admin_add_user_to_union(self, interaction: discord.Interaction, ign: str, role: discord.Role):
         if not self.has_admin_role(interaction.user):
             await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
             return
@@ -161,45 +161,61 @@ class UnionMembership(commands.Cog):
                 await interaction.response.send_message(f"❌ Role **{role.name}** is not registered as union", ephemeral=True)
                 return
 
-            # Get existing user data if user already exists
-            existing = await conn.fetchrow("SELECT ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE discord_id = $1", str(username.id))
+            # Find user by IGN (primary or secondary)
+            user_row = await conn.fetchrow(
+                "SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE ign_primary = $1 OR ign_secondary = $1", 
+                ign
+            )
             
-            if existing:
-                # User exists - check which union slot is available
-                if not existing['union_name']:
-                    # Primary slot is available
-                    await conn.execute("UPDATE users SET union_name = $1 WHERE discord_id = $2", str(role.id), str(username.id))
-                    slot_used = "Primary"
-                elif not existing['union_name_2']:
-                    # Secondary slot is available
-                    await conn.execute("UPDATE users SET union_name_2 = $1 WHERE discord_id = $2", str(role.id), str(username.id))
-                    slot_used = "Secondary"
-                else:
-                    # Both slots occupied - ask which to replace
-                    primary_role = interaction.guild.get_role(int(existing['union_name'])) if existing['union_name'] else None
-                    secondary_role = interaction.guild.get_role(int(existing['union_name_2'])) if existing['union_name_2'] else None
-                    
-                    primary_name = primary_role.name if primary_role else f"Role ID: {existing['union_name']}"
-                    secondary_name = secondary_role.name if secondary_role else f"Role ID: {existing['union_name_2']}"
-                    
+            if not user_row:
+                await interaction.response.send_message(
+                    f"❌ No Discord user found with IGN **{ign}**. They must register their IGN first using `/register_primary_ign` or `/register_secondary_ign`.", 
+                    ephemeral=True
+                )
+                return
+
+            # Determine which IGN this is and which slot to use
+            is_primary_ign = (user_row['ign_primary'] == ign)
+            ign_type = "Primary" if is_primary_ign else "Secondary"
+            
+            # Check if user is already in this union with this IGN
+            current_union = user_row['union_name'] if is_primary_ign else user_row['union_name_2']
+            if str(current_union) == str(role.id):
+                await interaction.response.send_message(
+                    f"❌ **{ign}** is already in union **{role.name}**", 
+                    ephemeral=True
+                )
+                return
+
+            # Check if this IGN is already in another union
+            if current_union:
+                try:
+                    current_role = interaction.guild.get_role(int(current_union))
+                    current_role_name = current_role.name if current_role else f"Role ID: {current_union}"
                     await interaction.response.send_message(
-                        f"❌ {username.mention} is already in two unions:\n"
-                        f"• **Primary:** {primary_name}\n"
-                        f"• **Secondary:** {secondary_name}\n\n"
-                        f"Use `/admin_remove_ign_from_union` first to free up a slot.",
+                        f"❌ **{ign}** ({ign_type} IGN) is already in union **{current_role_name}**. Use `/admin_remove_ign_from_union` first to move them.",
                         ephemeral=True
                     )
                     return
+                except:
+                    # Invalid role ID in database, proceed with update
+                    pass
+
+            # Update the appropriate union slot
+            if is_primary_ign:
+                await conn.execute("UPDATE users SET union_name = $1 WHERE discord_id = $2", str(role.id), user_row['discord_id'])
             else:
-                # User doesn't exist - create new record with union in primary slot
-                await conn.execute("""
-                    INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2)
-                    VALUES ($1, $2, NULL, NULL, $3, NULL)
-                """, str(username.id), username.display_name, str(role.id))
-                slot_used = "Primary"
+                await conn.execute("UPDATE users SET union_name_2 = $1 WHERE discord_id = $2", str(role.id), user_row['discord_id'])
+
+            # Get Discord user for display
+            try:
+                discord_user = await self.bot.fetch_user(int(user_row['discord_id']))
+                user_display = f"{discord_user.mention} ({discord_user.name})"
+            except:
+                user_display = f"User ID: {user_row['discord_id']}"
 
             await interaction.response.send_message(
-                f"✅ {username.mention} added to union **{role.name}** ({slot_used} slot) (Admin override)", 
+                f"✅ **{ign}** ({user_display}) added to union **{role.name}** using {ign_type} IGN (Admin override)", 
                 ephemeral=True
             )
         except Exception as e:
