@@ -1,20 +1,21 @@
-import sqlite3
-import asyncio
-from contextlib import asynccontextmanager
+import asyncpg
+import os
+from urllib.parse import urlparse
 
-@asynccontextmanager
 async def get_connection():
-    """Async context manager for SQLite connections"""
-    conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row  # This allows dict-like access to rows
-    try:
-        yield conn
-    finally:
-        conn.close()
+    """Get a PostgreSQL connection using asyncpg"""
+    database_url = os.getenv("DATABASE_URL")
 
-# Alternative simpler function if you prefer
-def get_sync_connection():
-    """Get synchronous SQLite connection"""
-    conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row
-    return conn
+    if not database_url:
+        raise RuntimeError("DATABASE_URL environment variable not set")
+
+    result = urlparse(database_url)
+
+    return await asyncpg.connect(
+        user=result.username,
+        password=result.password,
+        database=result.path[1:],
+        host=result.hostname,
+        port=result.port,
+        ssl='require'
+    )
