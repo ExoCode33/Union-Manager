@@ -14,7 +14,7 @@ class UnionMembership(commands.Cog):
         """Get the union role_id this user leads"""
         conn = await get_connection()
         try:
-            row = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE leader_id = $1", str(user_id))
+            row = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1", str(user_id))
             return int(row['role_id']) if row else None
         finally:
             await conn.close()
