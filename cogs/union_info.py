@@ -100,9 +100,8 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(
                 title="🏛️ **UNION OVERVIEW**", 
                 description="*Complete list of all registered unions with their leaders and members*",
-                color=0x2B2D31
+                color=0x7B68EE  # Purple color
             )
-            embed.set_footer(text="👑 = Union Leader | Use /add_user_to_union to add members")
 
             # Process unions in batches to avoid timeout
             for union_row in unions:
@@ -226,9 +225,9 @@ class UnionInfo(commands.Cog):
                     
                     member_list = "\n".join(all_entries)
 
-                # Add field with member capacity
+                # Add field with member capacity - make union name bigger with bigger header
                 embed.add_field(
-                    name=f"## **{role_name}** ({member_count}/30 members)", 
+                    name=f"# **{role_name}** ({member_count}/30 members)", 
                     value=f"{member_list}",
                     inline=False
                 )
