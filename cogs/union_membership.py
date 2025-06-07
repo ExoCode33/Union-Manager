@@ -176,16 +176,16 @@ class UnionMembership(commands.Cog):
         finally:
             await conn.close()
 
-    @app_commands.command(name="admin_remove_user_from_union", description="Remove user from ANY union by IGN (Admin override)")
-    @app_commands.describe(ign="In-game name of the user to remove")
-    async def admin_remove_user_from_union(self, interaction: discord.Interaction, ign: str):
+    @app_commands.command(name="admin_remove_user_from_union", description="Remove user from specified union by IGN (Admin override)")
+    @app_commands.describe(ign="In-game name of the user to remove", role="Union role to remove them from")
+    async def admin_remove_user_from_union(self, interaction: discord.Interaction, ign: str, role: discord.Role):
         if not self.has_admin_role(interaction.user):
             await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
             return
 
         conn = await get_connection()
         try:
-            # Find user by IGN
+            # Find user by IGN and check if they're in the specified union
             row = await conn.fetchrow(
                 "SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE ign_primary = $1 OR ign_secondary = $1", 
                 ign
@@ -195,25 +195,18 @@ class UnionMembership(commands.Cog):
                 await interaction.response.send_message(f"❌ No user found with IGN **{ign}**", ephemeral=True)
                 return
 
-            # Determine which IGN and union slot we're dealing with
+            # Determine which IGN and check if they're in the specified union
             is_primary_ign = (row['ign_primary'] == ign)
             current_union = row['union_name'] if is_primary_ign else row['union_name_2']
             ign_type = "Primary" if is_primary_ign else "Secondary"
             
-            if not current_union:
+            # Check if they're in the specified union with this IGN
+            if str(current_union) != str(role.id):
                 await interaction.response.send_message(
-                    f"❌ **{ign}** ({ign_type} IGN) is not in any union", 
+                    f"❌ **{ign}** ({ign_type} IGN) is not in **{role.name}**", 
                     ephemeral=True
                 )
                 return
-
-            # Get role name for display
-            try:
-                role_id = int(current_union)
-                role = interaction.guild.get_role(role_id)
-                role_name = role.name if role else f"Role ID: {role_id}"
-            except:
-                role_name = current_union
 
             # Remove from the appropriate union slot
             if is_primary_ign:
@@ -228,7 +221,7 @@ class UnionMembership(commands.Cog):
                 user_display = f"User ID: {row['discord_id']}"
 
             await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) removed from union **{role_name}** ({ign_type} IGN slot) (Admin override)", 
+                f"✅ **{ign}** ({user_display}) removed from union **{role.name}** ({ign_type} IGN slot) (Admin override)", 
                 ephemeral=True
             )
         except Exception as e:
