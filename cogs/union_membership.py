@@ -46,12 +46,22 @@ class UnionMembership(commands.Cog):
                 )
                 return
 
-            # Update their union (store role_id as string in union_name for compatibility)
+            # Update their union (choose appropriate slot)
             await conn.execute("""
-                INSERT INTO users (discord_id, ign_primary, ign_secondary, union_name)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (discord_id) DO UPDATE SET union_name = EXCLUDED.union_name
-            """, row['discord_id'], row['ign_primary'], row['ign_secondary'], str(led_union_id))
+                INSERT INTO users (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2)
+                VALUES ($1, $2, $3, $4, $5, NULL)
+                ON CONFLICT (discord_id) DO UPDATE SET 
+                    union_name = CASE 
+                        WHEN users.union_name IS NULL THEN EXCLUDED.union_name
+                        WHEN users.union_name_2 IS NULL THEN users.union_name
+                        ELSE users.union_name
+                    END,
+                    union_name_2 = CASE 
+                        WHEN users.union_name IS NOT NULL AND users.union_name_2 IS NULL THEN EXCLUDED.union_name
+                        ELSE users.union_name_2
+                    END
+            """, row['discord_id'], led_union_role.name if led_union_role else f"Role {led_union_id}", 
+                 row['ign_primary'], row['ign_secondary'], str(led_union_id))
 
             try:
                 discord_user = await self.bot.fetch_user(int(row['discord_id']))
