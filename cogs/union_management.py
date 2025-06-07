@@ -180,45 +180,5 @@ class UnionManagement(commands.Cog):
         finally:
             conn.close()
 
-    @app_commands.command(name="check_ign_binding", description="Check which Discord user an IGN is bound to (Admin only)")
-    @app_commands.describe(ign="In-game name to check")
-    async def check_ign_binding(self, interaction: discord.Interaction, ign: str):
-        if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
-            return
-
-        conn = self.get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT discord_id, ign_primary, ign_secondary FROM users WHERE ign_primary = ? OR ign_secondary = ?", 
-                (ign, ign)
-            )
-            row = cursor.fetchone()
-            
-            if not row:
-                await interaction.response.send_message(f"❌ No Discord user found with IGN **{ign}**", ephemeral=True)
-                return
-
-            try:
-                discord_user = await self.bot.fetch_user(int(row['discord_id']))
-                user_display = f"{discord_user.mention} ({discord_user.name})"
-            except:
-                user_display = f"User ID: {row['discord_id']}"
-
-            ign_type = "Primary" if row['ign_primary'] == ign else "Secondary"
-            
-            await interaction.response.send_message(
-                f"✅ IGN **{ign}** is bound to {user_display}\n"
-                f"**Type:** {ign_type} IGN\n"
-                f"**Primary IGN:** {row['ign_primary'] or 'Not set'}\n"
-                f"**Secondary IGN:** {row['ign_secondary'] or 'Not set'}",
-                ephemeral=True
-            )
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error checking IGN binding: {str(e)}", ephemeral=True)
-        finally:
-            conn.close()
-
 async def setup(bot):
     await bot.add_cog(UnionManagement(bot))
