@@ -70,7 +70,7 @@ class UnionMembership(commands.Cog):
                 user_display = f"User ID: {row['discord_id']}"
 
             await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) added to your union **{led_union_name}**", 
+                f"✅ **{ign}** ({user_display}) added to your union **{led_union_name}** using {ign_type} IGN", 
                 ephemeral=True
             )
         except Exception as e:
@@ -92,21 +92,39 @@ class UnionMembership(commands.Cog):
 
         conn = await get_connection()
         try:
-            # Find user by IGN and check if they're in our union
+            # Find user by IGN and check if they're in our union (in the correct slot)
             row = await conn.fetchrow(
-                "SELECT discord_id, union_name FROM users WHERE (ign_primary = $1 OR ign_secondary = $1) AND union_name = $2", 
-                ign, str(led_union_id)
+                """SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2 
+                   FROM users 
+                   WHERE (ign_primary = $1 OR ign_secondary = $1)""", 
+                ign
             )
             
             if not row:
                 await interaction.response.send_message(
-                    f"❌ No user with IGN **{ign}** found in your union **{led_union_name}**", 
+                    f"❌ No user with IGN **{ign}** found", 
                     ephemeral=True
                 )
                 return
 
-            # Remove from union
-            await conn.execute("UPDATE users SET union_name = NULL WHERE discord_id = $1", row['discord_id'])
+            # Determine which IGN and union slot we're dealing with
+            is_primary_ign = (row['ign_primary'] == ign)
+            current_union = row['union_name'] if is_primary_ign else row['union_name_2']
+            ign_type = "Primary" if is_primary_ign else "Secondary"
+            
+            # Check if they're in our union in the correct slot
+            if str(current_union) != str(led_union_id):
+                await interaction.response.send_message(
+                    f"❌ **{ign}** is not in your union **{led_union_name}** (checked {ign_type} IGN slot)", 
+                    ephemeral=True
+                )
+                return
+
+            # Remove from the appropriate union slot
+            if is_primary_ign:
+                await conn.execute("UPDATE users SET union_name = NULL WHERE discord_id = $1", row['discord_id'])
+            else:
+                await conn.execute("UPDATE users SET union_name_2 = NULL WHERE discord_id = $1", row['discord_id'])
 
             try:
                 discord_user = await self.bot.fetch_user(int(row['discord_id']))
@@ -115,7 +133,7 @@ class UnionMembership(commands.Cog):
                 user_display = f"User ID: {row['discord_id']}"
 
             await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) removed from your union **{led_union_name}**", 
+                f"✅ **{ign}** ({user_display}) removed from your union **{led_union_name}** ({ign_type} IGN slot)", 
                 ephemeral=True
             )
         except Exception as e:
