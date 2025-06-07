@@ -12,10 +12,10 @@ class UnionInfo(commands.Cog):
         conn = await get_connection()
         try:
             rows = await conn.fetch("""
-                SELECT ul.role_id, ul.leader_id, u.ign_primary, u.ign_secondary
+                SELECT ul.role_id, ul.user_id, u.ign_primary, u.ign_secondary
                 FROM union_leaders ul
                 JOIN union_roles ur ON ul.role_id = ur.role_id
-                LEFT JOIN users u ON ul.leader_id = u.discord_id
+                LEFT JOIN users u ON ul.user_id = u.discord_id
                 ORDER BY ul.role_id
             """)
 
@@ -27,7 +27,7 @@ class UnionInfo(commands.Cog):
 
             for row in rows:
                 role_id = int(row["role_id"])
-                leader_id = row["leader_id"]
+                leader_id = row["user_id"]
                 ign_primary = row["ign_primary"]
                 ign_secondary = row["ign_secondary"]
 
@@ -83,8 +83,8 @@ class UnionInfo(commands.Cog):
                 role_name = role.name if role else f"Unknown Role (ID: {role_id})"
 
                 # Get union leader
-                leader_row = await conn.fetchrow("SELECT leader_id FROM union_leaders WHERE role_id = $1", role_id)
-                leader_id = leader_row['leader_id'] if leader_row else None
+                leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1", role_id)
+                leader_id = leader_row['user_id'] if leader_row else None
 
                 # Get all members - need to match by role_id converted to string for union_name
                 members = await conn.fetch("""
