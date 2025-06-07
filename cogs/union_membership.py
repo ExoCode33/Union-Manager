@@ -176,9 +176,9 @@ class UnionMembership(commands.Cog):
         finally:
             await conn.close()
 
-    @app_commands.command(name="admin_remove_user_from_union", description="Remove user from specified union by IGN (Admin override)")
-    @app_commands.describe(ign="In-game name of the user to remove", role="Union role to remove them from")
-    async def admin_remove_user_from_union(self, interaction: discord.Interaction, ign: str, role: discord.Role):
+    @app_commands.command(name="admin_remove_ign_from_union", description="Remove IGN from specified union (Admin override)")
+    @app_commands.describe(ign="In-game name to remove", role="Union role to remove them from")
+    async def admin_remove_ign_from_union(self, interaction: discord.Interaction, ign: str, role: discord.Role):
         if not self.has_admin_role(interaction.user):
             await interaction.response.send_message("❌ This command requires the @Admin role.", ephemeral=True)
             return
