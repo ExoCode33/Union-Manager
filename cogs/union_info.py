@@ -25,15 +25,16 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(title="👑 Union Leaders", color=0x00ff00)
 
             for row in rows:
-                role_id = row["role_id"]
+                role_id_str = str(row["role_id"]).strip().replace("'", "")
                 user_id = row["user_id"]
 
                 try:
-                    role = interaction.guild.get_role(int(role_id))
+                    role_id_int = int(role_id_str)
+                    role = interaction.guild.get_role(role_id_int)
                 except:
                     role = None
 
-                role_name = role.name if role else f"(Role ID: {role_id})"
+                role_name = role.name if role else f"(Role ID: {role_id_str})"
 
                 try:
                     leader = await self.bot.fetch_user(int(user_id))
@@ -67,11 +68,9 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(title="🏛️ Union Details", color=0x0099ff)
 
             for row in unions:
-                role_id_raw = row['role_id']
-                role_id_str = str(role_id_raw)
-
+                role_id_str = str(row['role_id']).strip().replace("'", "")
                 try:
-                    role_id_int = int(role_id_raw)
+                    role_id_int = int(role_id_str)
                     role = interaction.guild.get_role(role_id_int)
                 except:
                     role = None
