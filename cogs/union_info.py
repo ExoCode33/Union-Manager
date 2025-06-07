@@ -64,11 +64,12 @@ class UnionInfo(commands.Cog):
 
             for row in unions:
                 role_id = row['role_id']
+                role_id_str = str(role_id)  # cast to string for PostgreSQL
                 role = interaction.guild.get_role(int(role_id))
                 role_name = role.name if role else f"(Role ID: {role_id})"
 
                 leader_row = await conn.fetchrow(
-                    "SELECT user_id FROM union_leaders WHERE role_id = $1", role_id
+                    "SELECT user_id FROM union_leaders WHERE role_id = $1", role_id_str
                 )
                 leader_id = leader_row['user_id'] if leader_row else None
 
@@ -79,7 +80,7 @@ class UnionInfo(commands.Cog):
                     WHERE union_name = $1
                     ORDER BY discord_id
                     """,
-                    role_id
+                    role_id_str
                 )
 
                 if not members:
