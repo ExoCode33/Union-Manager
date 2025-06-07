@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from utils.db import get_connection  # Make sure this exists and uses asyncpg
+from utils.db import get_connection  # Uses asyncpg
 
 class UnionInfo(commands.Cog):
     def __init__(self, bot):
@@ -12,10 +12,10 @@ class UnionInfo(commands.Cog):
         conn = await get_connection()
         try:
             rows = await conn.fetch("""
-                SELECT ul.role_name, ul.leader_id 
+                SELECT ul.role_id, ul.user_id
                 FROM union_leaders ul
-                JOIN union_roles ur ON ul.role_name = ur.role_name
-                ORDER BY ul.role_name
+                JOIN union_roles ur ON ul.role_id = ur.role_id
+                ORDER BY ul.role_id
             """)
 
             if not rows:
@@ -24,15 +24,21 @@ class UnionInfo(commands.Cog):
 
             embed = discord.Embed(title="👑 Union Leaders", color=0x00ff00)
 
-            for union_name, leader_id in rows:
+            for row in rows:
+                role_id = row["role_id"]
+                user_id = row["user_id"]
+
+                role = interaction.guild.get_role(int(role_id))
+                role_name = role.name if role else f"(Role ID: {role_id})"
+
                 try:
-                    leader = await self.bot.fetch_user(int(leader_id))
+                    leader = await self.bot.fetch_user(int(user_id))
                     leader_display = f"{leader.mention} ({leader.name})"
                 except:
-                    leader_display = f"Unknown User (ID: {leader_id})"
+                    leader_display = f"Unknown User (ID: {user_id})"
 
                 embed.add_field(
-                    name=f"**{union_name}**",
+                    name=f"**{role_name}**",
                     value=leader_display,
                     inline=False
                 )
@@ -48,7 +54,7 @@ class UnionInfo(commands.Cog):
     async def show_union_detail(self, interaction: discord.Interaction):
         conn = await get_connection()
         try:
-            unions = await conn.fetch("SELECT role_name FROM union_roles ORDER BY role_name")
+            unions = await conn.fetch("SELECT role_id FROM union_roles ORDER BY role_id")
 
             if not unions:
                 await interaction.response.send_message("❌ No unions found.")
@@ -57,21 +63,23 @@ class UnionInfo(commands.Cog):
             embed = discord.Embed(title="🏛️ Union Details", color=0x0099ff)
 
             for row in unions:
-                union_name = row['role_name']
+                role_id = row['role_id']
+                role = interaction.guild.get_role(int(role_id))
+                role_name = role.name if role else f"(Role ID: {role_id})"
 
                 leader_row = await conn.fetchrow(
-                    "SELECT leader_id FROM union_leaders WHERE role_name = $1", union_name
+                    "SELECT user_id FROM union_leaders WHERE role_id = $1", role_id
                 )
-                leader_id = leader_row['leader_id'] if leader_row else None
+                leader_id = leader_row['user_id'] if leader_row else None
 
                 members = await conn.fetch(
                     """
                     SELECT discord_id, ign_primary, ign_secondary
                     FROM users
-                    WHERE union_name = $1
+                    WHERE union_role_id = $1
                     ORDER BY discord_id
                     """,
-                    union_name
+                    role_id
                 )
 
                 if not members:
@@ -102,14 +110,4 @@ class UnionInfo(commands.Cog):
 
                     member_list = "\n".join(member_entries)
 
-                embed.add_field(name=f"**{union_name}**", value=member_list, inline=False)
-
-            await interaction.response.send_message(embed=embed)
-
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
-        finally:
-            await conn.close()
-
-async def setup(bot):
-    await bot.add_cog(UnionInfo(bot))
+                embed.add_field(name=f"**{role_name}**", valu**_**_
