@@ -32,6 +32,10 @@ async def on_ready():
         except Exception as e:
             print(f"❌ Failed to load {module}: {e}")
     
+    # 🔥 EXTRA AGGRESSIVE - Clear again after loading
+    print("🔄 Clearing command cache again after loading cogs...")
+    bot.tree.clear_commands(guild=None)
+    
     # 🔥 Force sync commands (global and guild-specific)
     print("🔄 Syncing commands...")
     synced = await bot.tree.sync()
@@ -42,5 +46,19 @@ async def on_ready():
     # print(f"✅ Synced {len(synced_guild)} commands to guild")
     
     print(f"✅ Bot is ready. Logged in as {bot.user}")
+
+# Add this command to manually force sync if needed
+@bot.command(name='force_sync')
+async def force_sync(ctx):
+    """Manual command to force sync slash commands"""
+    if not any(role.name.lower() == "admin" for role in ctx.author.roles):
+        await ctx.send("❌ Admin only command")
+        return
+    
+    print("🔄 Manual force sync initiated...")
+    bot.tree.clear_commands(guild=None)
+    synced = await bot.tree.sync()
+    await ctx.send(f"✅ Force synced {len(synced)} commands")
+    print(f"✅ Manual sync completed: {len(synced)} commands")
 
 bot.run(TOKEN)
