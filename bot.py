@@ -80,5 +80,41 @@ async def list_commands(ctx):
         await ctx.send(f"📋 Loaded commands ({len(commands)}): {', '.join(commands)}")
     else:
         await ctx.send("❌ No commands loaded!")
+    
+    # Also check cogs
+    cog_info = []
+    for cog_name, cog in bot.cogs.items():
+        cog_commands = [cmd.name for cmd in cog.get_app_commands()]
+        cog_info.append(f"{cog_name}: {len(cog_commands)} commands")
+    
+    if cog_info:
+        await ctx.send(f"📁 Cogs: {', '.join(cog_info)}")
+    else:
+        await ctx.send("❌ No cogs with commands found!")
+
+# Add debug command to manually add cog commands to tree
+@bot.command(name='debug_tree')
+async def debug_tree(ctx):
+    """Debug the command tree"""
+    if not any(role.name.lower() == "admin" for role in ctx.author.roles):
+        await ctx.send("❌ Admin only command")
+        return
+    
+    print("🔍 Debug: Checking command tree...")
+    
+    # Check if commands exist in cogs but not in tree
+    total_cog_commands = 0
+    for cog_name, cog in bot.cogs.items():
+        cog_commands = cog.get_app_commands()
+        total_cog_commands += len(cog_commands)
+        print(f"📁 {cog_name}: {len(cog_commands)} commands")
+        for cmd in cog_commands:
+            print(f"  - {cmd.name}")
+    
+    tree_commands = len(bot.tree.get_commands())
+    print(f"🌳 Tree has {tree_commands} commands")
+    print(f"📊 Total cog commands: {total_cog_commands}")
+    
+    await ctx.send(f"Debug info printed to console. Tree: {tree_commands}, Cogs: {total_cog_commands}")
 
 bot.run(TOKEN)
