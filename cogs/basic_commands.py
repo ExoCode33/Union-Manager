@@ -132,33 +132,36 @@ class BasicCommands(commands.Cog):
                 
                 response = f"**Discord:** {discord_user.mention} ({discord_user.name})\n"
                 if row:
-                    response += f"**Primary IGN:** {row['ign_primary'] or 'Not registered'}\n"
-                    response += f"**Secondary IGN:** {row['ign_secondary'] or 'Not registered'}\n"
-                    
-                    # Handle dual unions
-                    unions = []
+                    # Show Primary IGN with its union
+                    primary_ign = row['ign_primary'] or 'Not registered'
                     if row['union_name']:
                         try:
                             role_id = int(row['union_name'])
                             role = interaction.guild.get_role(role_id)
-                            union_display = role.name if role else f"Role ID: {role_id}"
-                            unions.append(f"{union_display} (Primary IGN)")
+                            primary_union = role.name if role else f"Role ID: {role_id}"
                         except:
-                            unions.append(f"{row['union_name']} (Primary IGN)")
+                            primary_union = row['union_name']
+                    else:
+                        primary_union = "None"
                     
+                    response += f"**Primary IGN:** {primary_ign} ~ **Union:** {primary_union}\n"
+                    
+                    # Show Secondary IGN with its union
+                    secondary_ign = row['ign_secondary'] or 'Not registered'
                     if row['union_name_2']:
                         try:
                             role_id = int(row['union_name_2'])
                             role = interaction.guild.get_role(role_id)
-                            union_display = role.name if role else f"Role ID: {role_id}"
-                            unions.append(f"{union_display} (Secondary IGN)")
+                            secondary_union = role.name if role else f"Role ID: {role_id}"
                         except:
-                            unions.append(f"{row['union_name_2']} (Secondary IGN)")
+                            secondary_union = row['union_name_2']
+                    else:
+                        secondary_union = "None"
                     
-                    union_text = " | ".join(unions) if unions else "Not assigned"
-                    response += f"**Unions:** {union_text}"
+                    response += f"**Secondary IGN:** {secondary_ign} ~ **Union:** {secondary_union}"
                 else:
-                    response += "**Primary IGN:** Not registered\n**Secondary IGN:** Not registered\n**Unions:** Not assigned"
+                    response += "**Primary IGN:** Not registered ~ **Union:** None\n"
+                    response += "**Secondary IGN:** Not registered ~ **Union:** None"
                 
                 await interaction.response.send_message(response)
                 return
@@ -189,33 +192,35 @@ class BasicCommands(commands.Cog):
                 elif row['ign_secondary'] and query.lower() in row['ign_secondary'].lower():
                     matched_ign = f"{row['ign_secondary']} (Secondary)"
                 
-                # Handle dual unions
+                # Handle dual unions for single result with IGN binding
                 unions = []
                 if row['union_name']:
                     try:
                         role_id = int(row['union_name'])
                         role = interaction.guild.get_role(role_id)
                         union_display = role.name if role else f"Role ID: {role_id}"
-                        unions.append(f"{union_display} (Primary)")
+                        primary_ign = row['ign_primary'] or '*Not registered*'
+                        unions.append(f"{union_display} ~ IGN: {primary_ign}")
                     except:
-                        unions.append(f"{row['union_name']} (Primary)")
+                        primary_ign = row['ign_primary'] or '*Not registered*'
+                        unions.append(f"{row['union_name']} ~ IGN: {primary_ign}")
                 
                 if row['union_name_2']:
                     try:
                         role_id = int(row['union_name_2'])
                         role = interaction.guild.get_role(role_id)
                         union_display = role.name if role else f"Role ID: {role_id}"
-                        unions.append(f"{union_display} (Secondary)")
+                        secondary_ign = row['ign_secondary'] or '*Not registered*'
+                        unions.append(f"{union_display} ~ IGN: {secondary_ign}")
                     except:
-                        unions.append(f"{row['union_name_2']} (Secondary)")
+                        secondary_ign = row['ign_secondary'] or '*Not registered*'
+                        unions.append(f"{row['union_name_2']} ~ IGN: {secondary_ign}")
                 
-                union_text = " | ".join(unions) if unions else "Not assigned"
-                
-                response = f"**Matched IGN:** {matched_ign}\n"
-                response += f"**Discord:** {user_display}\n"
-                response += f"**Primary IGN:** {row['ign_primary'] or 'Not registered'}\n"
-                response += f"**Secondary IGN:** {row['ign_secondary'] or 'Not registered'}\n"
-                response += f"**Unions:** {union_text}"
+                if unions:
+                    union_text = "\n".join([f"**• {union}**" for union in unions])
+                    response += f"**Unions:**\n{union_text}"
+                else:
+                    response += "**Unions:** Not assigned"
                 
                 await interaction.response.send_message(response)
             else:
