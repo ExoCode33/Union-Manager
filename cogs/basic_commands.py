@@ -10,37 +10,78 @@ class BasicCommands(commands.Cog):
     def get_db_connection(self):
         return sqlite3.connect("database.db")
 
-    @app_commands.command(name="register_ign", description="Register a user's in-game name")
-    @app_commands.describe(username="Discord username", ign="In-game name")
+    @app_commands.command(name="register_ign", description="Register a user's primary in-game name")
+    @app_commands.describe(username="Discord username", ign="Primary in-game name")
     async def register_ign(self, interaction: discord.Interaction, username: discord.Member, ign: str):
         conn = self.get_db_connection()
         cursor = conn.cursor()
         
         try:
-            cursor.execute("INSERT OR REPLACE INTO users (discord_id, ign, union_name) VALUES (?, ?, COALESCE((SELECT union_name FROM users WHERE discord_id = ?), NULL))", 
-                         (str(username.id), ign, str(username.id)))
+            cursor.execute("""INSERT OR REPLACE INTO users (discord_id, ign_primary, ign_secondary, union_name) 
+                             VALUES (?, ?, 
+                                     COALESCE((SELECT ign_secondary FROM users WHERE discord_id = ?), NULL), 
+                                     COALESCE((SELECT union_name FROM users WHERE discord_id = ?), NULL))""", 
+                         (str(username.id), ign, str(username.id), str(username.id)))
             conn.commit()
-            await interaction.response.send_message(f"✅
+            await interaction.response.send_message(f"✅ Primary IGN for {username.mention} ({username.name}) set to **{ign}**", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error registering IGN: {str(e)}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error registering primary IGN: {str(e)}", ephemeral=True)
         finally:
             conn.close()
 
-    @app_commands.command(name="deregister_ign", description="Remove a user's IGN registration")
+    @app_commands.command(name="register_secondary_ign", description="Register a user's secondary in-game name")
+    @app_commands.describe(username="Discord username", ign="Secondary in-game name")
+    async def register_secondary_ign(self, interaction: discord.Interaction, username: discord.Member, ign: str):
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""INSERT OR REPLACE INTO users (discord_id, ign_primary, ign_secondary, union_name) 
+                             VALUES (?, 
+                                     COALESCE((SELECT ign_primary FROM users WHERE discord_id = ?), NULL), 
+                                     ?, 
+                                     COALESCE((SELECT union_name FROM users WHERE discord_id = ?), NULL))""", 
+                         (str(username.id), str(username.id), ign, str(username.id)))
+            conn.commit()
+            await interaction.response.send_message(f"✅ Secondary IGN for {username.mention} ({username.name}) set to **{ign}**", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error registering secondary IGN: {str(e)}", ephemeral=True)
+        finally:
+            conn.close()
+
+    @app_commands.command(name="deregister_ign", description="Remove a user's primary IGN registration")
     @app_commands.describe(username="Discord username")
     async def deregister_ign(self, interaction: discord.Interaction, username: discord.Member):
         conn = self.get_db_connection()
         cursor = conn.cursor()
         
         try:
-            cursor.execute("UPDATE users SET ign = NULL WHERE discord_id = ?", (str(username.id),))
+            cursor.execute("UPDATE users SET ign_primary = NULL WHERE discord_id = ?", (str(username.id),))
             if cursor.rowcount > 0:
                 conn.commit()
-                await interaction.response.send_message(f"✅ IGN for {username.mention} ({username.name}) has been removed", ephemeral=True)
+                await interaction.response.send_message(f"✅ Primary IGN for {username.mention} ({username.name}) has been removed", ephemeral=True)
             else:
-                await interaction.response.send_message(f"❌ No IGN found for {username.mention}", ephemeral=True)
+                await interaction.response.send_message(f"❌ No primary IGN found for {username.mention}", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error removing IGN: {str(e)}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error removing primary IGN: {str(e)}", ephemeral=True)
+        finally:
+            conn.close()
+
+    @app_commands.command(name="deregister_secondary_ign", description="Remove a user's secondary IGN registration")
+    @app_commands.describe(username="Discord username")
+    async def deregister_secondary_ign(self, interaction: discord.Interaction, username: discord.Member):
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("UPDATE users SET ign_secondary = NULL WHERE discord_id = ?", (str(username.id),))
+            if cursor.rowcount > 0:
+                conn.commit()
+                await interaction.response.send_message(f"✅ Secondary IGN for {username.mention} ({username.name}) has been removed", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ No secondary IGN found for {username.mention}", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error removing secondary IGN: {str(e)}", ephemeral=True)
         finally:
             conn.close()
 
