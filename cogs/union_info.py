@@ -108,9 +108,9 @@ class UnionInfo(commands.Cog):
                 leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1", role_id)
                 leader_id = leader_row['user_id'] if leader_row else None
 
-                # Get all members - check both union_name and union_name_2
+                # Get all members - get both union slots to determine which IGN to show
                 members = await conn.fetch("""
-                    SELECT discord_id, ign_primary, ign_secondary
+                    SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2
                     FROM users
                     WHERE union_name = $1 OR union_name_2 = $1
                     ORDER BY discord_id
@@ -164,6 +164,8 @@ class UnionInfo(commands.Cog):
                         discord_id = record['discord_id']
                         ign_primary = record['ign_primary']
                         ign_secondary = record['ign_secondary']
+                        union_name = record['union_name']
+                        union_name_2 = record['union_name_2']
 
                         try:
                             user = await self.bot.fetch_user(int(discord_id))
@@ -171,19 +173,18 @@ class UnionInfo(commands.Cog):
                         except:
                             discord_name = f"Unknown User (ID: {discord_id})"
 
-                        # Format IGNs
-                        ign_parts = []
-                        if ign_primary:
-                            ign_parts.append(ign_primary)
-                        if ign_secondary:
-                            ign_parts.append(ign_secondary)
-
-                        if ign_parts:
-                            ign_display = ' | '.join(ign_parts)
+                        # Determine which IGN to show based on which union slot matches
+                        if str(union_name) == str(role_id):
+                            # User is in this union via their primary IGN
+                            relevant_ign = ign_primary if ign_primary else "*Not registered*"
+                        elif str(union_name_2) == str(role_id):
+                            # User is in this union via their secondary IGN
+                            relevant_ign = ign_secondary if ign_secondary else "*Not registered*"
                         else:
-                            ign_display = "*Not registered*"
+                            # Fallback (shouldn't happen)
+                            relevant_ign = "*Unknown*"
 
-                        full_display = f"**{discord_name}** ~ IGN: *{ign_display}*"
+                        full_display = f"**{discord_name}** ~ IGN: *{relevant_ign}*"
 
                         # Check if this user is the leader
                         if leader_id and str(discord_id) == str(leader_id):
@@ -199,19 +200,25 @@ class UnionInfo(commands.Cog):
                         except:
                             discord_name = f"Unknown User (ID: {leader_id})"
                         
-                        leader_igns = await conn.fetchrow(
-                            "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
+                        # Get leader's union data to determine which IGN to show
+                        leader_data = await conn.fetchrow(
+                            "SELECT ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE discord_id = $1", 
                             str(leader_id)
                         )
-                        ign_parts = []
-                        if leader_igns:
-                            if leader_igns['ign_primary']:
-                                ign_parts.append(leader_igns['ign_primary'])
-                            if leader_igns['ign_secondary']:
-                                ign_parts.append(leader_igns['ign_secondary'])
                         
-                        ign_display = ' | '.join(ign_parts) if ign_parts else "*Not registered*"
-                        leader_entry = f"　👑 **{discord_name}** ~ IGN: *{ign_display}*"
+                        if leader_data:
+                            # Determine which IGN the leader uses for this union
+                            if str(leader_data['union_name']) == str(role_id):
+                                leader_ign = leader_data['ign_primary'] if leader_data['ign_primary'] else "*Not registered*"
+                            elif str(leader_data['union_name_2']) == str(role_id):
+                                leader_ign = leader_data['ign_secondary'] if leader_data['ign_secondary'] else "*Not registered*"
+                            else:
+                                # Leader not actually in this union via either slot
+                                leader_ign = "*Not in union*"
+                        else:
+                            leader_ign = "*Not registered*"
+                        
+                        leader_entry = f"　👑 **{discord_name}** ~ IGN: *{leader_ign}*"
 
                     # Combine leader (always first) + members
                     all_entries = []
