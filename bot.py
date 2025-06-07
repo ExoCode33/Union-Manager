@@ -8,16 +8,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    # 🔥 AGGRESSIVE cache clearing - clear commands multiple times
-    print("🔄 Clearing command cache...")
-    bot.tree.clear_commands(guild=None)
+    print("🔄 Starting bot initialization...")
     
-    # Also clear for your specific guild if you know the ID
-    # Replace YOUR_GUILD_ID with your actual guild ID for instant testing
-    # guild = discord.Object(id=YOUR_GUILD_ID)
-    # bot.tree.clear_commands(guild=guild)
-    
-    # ✅ Load all cog modules
+    # ✅ Load all cog modules FIRST
     cog_modules = [
         "cogs.basic_commands",
         "cogs.union_management", 
@@ -32,18 +25,25 @@ async def on_ready():
         except Exception as e:
             print(f"❌ Failed to load {module}: {e}")
     
-    # 🔥 EXTRA AGGRESSIVE - Clear again after loading
-    print("🔄 Clearing command cache again after loading cogs...")
+    # 🔄 Clear command cache AFTER loading cogs
+    print("🔄 Clearing command cache...")
     bot.tree.clear_commands(guild=None)
     
-    # 🔥 Force sync commands (global and guild-specific)
+    # 🔄 Sync commands
     print("🔄 Syncing commands...")
-    synced = await bot.tree.sync()
-    print(f"✅ Synced {len(synced)} commands globally")
-    
-    # For instant testing, also sync to your guild
-    # synced_guild = await bot.tree.sync(guild=guild)
-    # print(f"✅ Synced {len(synced_guild)} commands to guild")
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} commands globally")
+        
+        # Debug: Show which commands were synced
+        if synced:
+            command_names = [cmd.name for cmd in synced]
+            print(f"📋 Commands synced: {', '.join(command_names)}")
+        else:
+            print("⚠️ No commands found to sync!")
+            
+    except Exception as e:
+        print(f"❌ Failed to sync commands: {e}")
     
     print(f"✅ Bot is ready. Logged in as {bot.user}")
 
@@ -56,9 +56,29 @@ async def force_sync(ctx):
         return
     
     print("🔄 Manual force sync initiated...")
-    bot.tree.clear_commands(guild=None)
-    synced = await bot.tree.sync()
-    await ctx.send(f"✅ Force synced {len(synced)} commands")
-    print(f"✅ Manual sync completed: {len(synced)} commands")
+    try:
+        synced = await bot.tree.sync()
+        await ctx.send(f"✅ Force synced {len(synced)} commands")
+        print(f"✅ Manual sync completed: {len(synced)} commands")
+        if synced:
+            command_names = [cmd.name for cmd in synced]
+            print(f"📋 Commands: {', '.join(command_names)}")
+    except Exception as e:
+        await ctx.send(f"❌ Sync failed: {e}")
+        print(f"❌ Manual sync failed: {e}")
+
+# Debug command to list loaded commands
+@bot.command(name='list_commands')
+async def list_commands(ctx):
+    """List all loaded slash commands"""
+    if not any(role.name.lower() == "admin" for role in ctx.author.roles):
+        await ctx.send("❌ Admin only command")
+        return
+    
+    commands = [cmd.name for cmd in bot.tree.get_commands()]
+    if commands:
+        await ctx.send(f"📋 Loaded commands ({len(commands)}): {', '.join(commands)}")
+    else:
+        await ctx.send("❌ No commands loaded!")
 
 bot.run(TOKEN)
