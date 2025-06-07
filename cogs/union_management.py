@@ -94,7 +94,30 @@ class UnionManagement(commands.Cog):
             except:
                 user_display = f"User ID: {discord_id}"
 
-            # Insert/update union leader - use separate check and insert/update
+            # Check if user is already a leader of another union
+            existing_leadership = await conn.fetchrow("SELECT role_id FROM union_leaders WHERE user_id = $1", int(discord_id))
+            if existing_leadership:
+                existing_role_id = existing_leadership['role_id']
+                if existing_role_id != role.id:
+                    # User is leader of a different union
+                    existing_role = interaction.guild.get_role(existing_role_id)
+                    existing_role_name = existing_role.name if existing_role else f"Role ID: {existing_role_id}"
+                    
+                    await interaction.response.send_message(
+                        f"❌ **{ign}** ({user_display}) is already a leader of **{existing_role_name}**. "
+                        f"A user can only lead one union at a time. Use `/dismiss_union_leader` first if you want to transfer their leadership.",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    # User is already leader of this same union
+                    await interaction.response.send_message(
+                        f"❌ **{ign}** ({user_display}) is already the leader of **{role.name}**",
+                        ephemeral=True
+                    )
+                    return
+
+            # Check if role already has a leader
             existing_leader = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1", role.id)
             
             if existing_leader:
