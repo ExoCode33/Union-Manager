@@ -1,4 +1,4 @@
-import discord
+# Checkimport discord
 from discord.ext import commands
 from discord import app_commands
 from utils.db import get_connection  # Uses asyncpg
@@ -23,7 +23,12 @@ class UnionInfo(commands.Cog):
                 await interaction.response.send_message("❌ No union leaders found.")
                 return
 
-            embed = discord.Embed(title="👑 Union Leaders", color=0x00ff00)
+            embed = discord.Embed(
+                title="👑 **UNION LEADERSHIP**", 
+                description="*All appointed union leaders with their IGN information*",
+                color=0xFFD700  # Gold color for leadership
+            )
+            embed.set_footer(text="Use /appoint_union_leader to assign new leaders")
 
             for row in rows:
                 role_id = int(row["role_id"])
@@ -37,24 +42,36 @@ class UnionInfo(commands.Cog):
 
                 try:
                     leader = await self.bot.fetch_user(int(leader_id))
-                    leader_display = f"{leader.mention} ({leader.name})"
+                    leader_display = f"**{leader.display_name}** ({leader.name})\n"
+                    leader_display += f"🆔 `{leader.id}`"
                 except:
-                    leader_display = f"Unknown User (ID: {leader_id})"
+                    leader_display = f"**Unknown User**\n🆔 `{leader_id}`"
 
-                # Add IGN info if available
+                # Add IGN info if available with clear labels
                 ign_parts = []
                 if ign_primary:
-                    ign_parts.append(ign_primary)
+                    ign_parts.append(f"🎮 **IGN:** {ign_primary}")
                 if ign_secondary:
-                    ign_parts.append(ign_secondary)
+                    ign_parts.append(f"🎯 **Alt IGN:** {ign_secondary}")
                 
-                ign_display = f"\n**IGN:** {' | '.join(ign_parts)}" if ign_parts else ""
+                if ign_parts:
+                    ign_display = f"\n{chr(10).join(ign_parts)}"
+                else:
+                    ign_display = f"\n⚠️ *No IGN registered*"
 
                 embed.add_field(
-                    name=f"**{role_name}**",
-                    value=f"{leader_display}{ign_display}",
+                    name=f"🏛️ **{role_name}**",
+                    value=f"{leader_display}{ign_display}\n\u200b",
                     inline=False
                 )
+
+            # Add summary
+            total_leaders = len(rows)
+            embed.add_field(
+                name="📊 **SUMMARY**",
+                value=f"**Total Leaders:** {total_leaders}",
+                inline=False
+            )
 
             await interaction.response.send_message(embed=embed)
 
@@ -73,7 +90,12 @@ class UnionInfo(commands.Cog):
                 await interaction.response.send_message("❌ No unions found.")
                 return
 
-            embed = discord.Embed(title="🏛️ Union Details", color=0x0099ff)
+            embed = discord.Embed(
+                title="🏛️ **UNION OVERVIEW**", 
+                description="*Complete list of all registered unions with their leaders and members*",
+                color=0x2B2D31  # Discord dark theme color
+            )
+            embed.set_footer(text="👑 = Union Leader | Use /add_user_to_union to add members")
 
             for union_row in unions:
                 role_id = int(union_row['role_id'])
@@ -94,10 +116,52 @@ class UnionInfo(commands.Cog):
                     ORDER BY discord_id
                 """, str(role_id))
 
-                if not members:
-                    member_list = "No members"
+                # Count total members (including leader if they're in the members table)
+                member_count = len(members)
+                
+                # Check if leader exists but isn't in members table
+                leader_in_members = False
+                if leader_id:
+                    leader_in_members = any(str(member['discord_id']) == str(leader_id) for member in members)
+                    if not leader_in_members:
+                        member_count += 1  # Add 1 for the leader
+
+                if member_count == 0:
+                    if leader_id:
+                        # Show leader even if no other members
+                        try:
+                            leader_user = await self.bot.fetch_user(int(leader_id))
+                            discord_name = leader_user.display_name
+                            
+                            # Try to get leader's IGNs
+                            leader_igns = await conn.fetchrow(
+                                "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
+                                leader_id
+                            )
+                            if leader_igns and (leader_igns['ign_primary'] or leader_igns['ign_secondary']):
+                                ign_parts = []
+                                if leader_igns['ign_primary']:
+                                    ign_parts.append(leader_igns['ign_primary'])
+                                if leader_igns['ign_secondary']:
+                                    ign_parts.append(leader_igns['ign_secondary'])
+                                
+                                leader_display = f"**{discord_name}** ~ IGN: *{' | '.join(ign_parts)}*"
+                            else:
+                                leader_display = f"**{discord_name}** ~ IGN: *Not registered*"
+                            
+                            member_list = f"　👑 **{leader_display}**\n\n　　*No other members*"
+                            member_count = 1
+                        except:
+                            member_list = f"　👑 **Unknown Leader**\n\n　　*No other members*"
+                            member_count = 1
+                    else:
+                        member_list = "　🔍 **No leader assigned**\n　🔍 **No members**\n\n　　*Use `/appoint_union_leader` to assign a leader*"
+                        member_count = 0
                 else:
                     member_entries = []
+                    leader_entry = None
+                    
+                    # Process all members
                     for record in members:
                         discord_id = record['discord_id']
                         ign_primary = record['ign_primary']
@@ -105,12 +169,9 @@ class UnionInfo(commands.Cog):
 
                         try:
                             user = await self.bot.fetch_user(int(discord_id))
-                            user_display = user.mention
+                            discord_name = user.display_name
                         except:
-                            user_display = f"Unknown User (ID: {discord_id})"
-
-                        # Add crown if this user is the leader
-                        crown = "👑 " if leader_id and str(discord_id) == str(leader_id) else ""
+                            discord_name = f"Unknown User (ID: {discord_id})"
 
                         # Format IGNs
                         ign_parts = []
@@ -119,12 +180,86 @@ class UnionInfo(commands.Cog):
                         if ign_secondary:
                             ign_parts.append(ign_secondary)
 
-                        ign_display = f" ({' | '.join(ign_parts)})" if ign_parts else ""
-                        member_entries.append(f"{crown}{user_display}{ign_display}")
+                        if ign_parts:
+                            ign_display = ' | '.join(ign_parts)
+                        else:
+                            ign_display = "*Not registered*"
 
-                    member_list = "\n".join(member_entries)
+                        full_display = f"**{discord_name}** ~ IGN: *{ign_display}*"
 
-                embed.add_field(name=f"**{role_name}**", value=member_list, inline=False)
+                        # Check if this user is the leader
+                        if leader_id and str(discord_id) == str(leader_id):
+                            leader_entry = f"　👑 **{full_display}**"
+                        else:
+                            member_entries.append(f"　👤 {full_display}")
+                    
+                    # Handle leader not in members table
+                    if leader_id and not leader_in_members:
+                        try:
+                            leader_user = await self.bot.fetch_user(int(leader_id))
+                            discord_name = leader_user.display_name
+                        except:
+                            discord_name = f"Unknown User (ID: {leader_id})"
+                        
+                        # Try to get leader's IGNs
+                        leader_igns = await conn.fetchrow(
+                            "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
+                            leader_id
+                        )
+                        ign_parts = []
+                        if leader_igns:
+                            if leader_igns['ign_primary']:
+                                ign_parts.append(leader_igns['ign_primary'])
+                            if leader_igns['ign_secondary']:
+                                ign_parts.append(leader_igns['ign_secondary'])
+                        
+                        ign_display = ' | '.join(ign_parts) if ign_parts else "*Not registered*"
+                        leader_entry = f"　👑 **{discord_name}** ~ IGN: *{ign_display}*"
+
+                    # Combine leader (always first) + members - each on separate line with explicit breaks
+                    all_entries = []
+                    if leader_entry:
+                        all_entries.append(leader_entry)
+                    all_entries.extend(member_entries)
+                    
+                    member_list = "\n".join(all_entries)
+
+                # Add field with member capacity in the title - bigger and bolder union name
+                embed.add_field(
+                    name=f"# **{role_name}** ({member_count}/30 members)", 
+                    value=f"{member_list}",
+                    inline=False
+                )
+
+            # Add summary at the bottom with Discord ID ~ IGN format
+            total_unions = len(unions)
+            unions_with_leaders = await conn.fetchval("SELECT COUNT(*) FROM union_leaders")
+            
+            # Get total members across all unions
+            total_members = await conn.fetchval("SELECT COUNT(*) FROM users WHERE union_name IS NOT NULL")
+            
+            # Get the user who triggered the command for the summary example
+            try:
+                command_user = interaction.user
+                user_data = await conn.fetchrow(
+                    "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
+                    str(command_user.id)
+                )
+                
+                if user_data and (user_data['ign_primary'] or user_data['ign_secondary']):
+                    # Show primary IGN, or secondary if no primary
+                    user_ign = user_data['ign_primary'] or user_data['ign_secondary']
+                    summary_example = f"Discord ID {command_user.display_name} ~ IGN {user_ign}"
+                else:
+                    summary_example = f"Discord ID {command_user.display_name} ~ IGN *Not registered*"
+            except:
+                summary_example = "Discord ID ExoCode ~ IGN ExoCode#Test"
+            
+            embed.add_field(
+                name="📊 **SUMMARY**",
+                value=f"**Total Unions:** {total_unions}\n**Unions with Leaders:** {unions_with_leaders}\n**Total Members:** {total_members}\n\n**Format Example:** {summary_example}",
+                inline=False
+            )
 
             await interaction.response.send_message(embed=embed)
 
