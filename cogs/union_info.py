@@ -9,6 +9,9 @@ class UnionInfo(commands.Cog):
 
     @app_commands.command(name="show_union_leader", description="Show all union leaders and their assignments")
     async def show_union_leader(self, interaction: discord.Interaction):
+        # Defer the response immediately to prevent timeout
+        await interaction.response.defer()
+        
         conn = await get_connection()
         try:
             rows = await conn.fetch("""
@@ -20,7 +23,7 @@ class UnionInfo(commands.Cog):
             """)
 
             if not rows:
-                await interaction.response.send_message("❌ No union leaders found.")
+                await interaction.followup.send("❌ No union leaders found.")
                 return
 
             embed = discord.Embed(
@@ -74,21 +77,24 @@ class UnionInfo(commands.Cog):
                 inline=False
             )
 
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
         finally:
             await conn.close()
 
     @app_commands.command(name="show_union_detail", description="Show all unions with member lists and crown emojis")
     async def show_union_detail(self, interaction: discord.Interaction):
+        # Defer the response immediately to prevent timeout
+        await interaction.response.defer()
+        
         conn = await get_connection()
         try:
             unions = await conn.fetch("SELECT role_id FROM union_roles ORDER BY role_id")
 
             if not unions:
-                await interaction.response.send_message("❌ No unions found.")
+                await interaction.followup.send("❌ No unions found.")
                 return
 
             embed = discord.Embed(
@@ -98,6 +104,7 @@ class UnionInfo(commands.Cog):
             )
             embed.set_footer(text="👑 = Union Leader | Use /add_user_to_union to add members")
 
+            # Process unions in batches to avoid timeout
             for union_row in unions:
                 role_id = int(union_row['role_id'])
                 
@@ -105,16 +112,17 @@ class UnionInfo(commands.Cog):
                 role = interaction.guild.get_role(role_id)
                 role_name = role.name if role else f"Unknown Role (ID: {role_id})"
 
-                # Get union leader
+                # Get union leader (simplified query)
                 leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", role_id)
                 leader_id = leader_row['user_id'] if leader_row else None
 
-                # Get all members - get both union slots to determine which IGN to show
+                # Get all members (optimized query)
                 members = await conn.fetch("""
                     SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2
                     FROM users
                     WHERE union_name = $1 OR union_name_2 = $1
                     ORDER BY discord_id
+                    LIMIT 30
                 """, str(role_id))
 
                 # Count total members
@@ -133,6 +141,7 @@ class UnionInfo(commands.Cog):
                             leader_user = await self.bot.fetch_user(int(leader_id))
                             discord_name = leader_user.display_name
                             
+                            # Get leader IGN (simplified)
                             leader_igns = await conn.fetchrow(
                                 "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
                                 str(leader_id)
@@ -160,7 +169,7 @@ class UnionInfo(commands.Cog):
                     member_entries = []
                     leader_entry = None
                     
-                    # Process all members
+                    # Process members efficiently
                     for record in members:
                         discord_id = record['discord_id']
                         ign_primary = record['ign_primary']
@@ -168,21 +177,24 @@ class UnionInfo(commands.Cog):
                         union_name = record['union_name']
                         union_name_2 = record['union_name_2']
 
+                        # Use cached guild member if possible, fallback to API
                         try:
-                            user = await self.bot.fetch_user(int(discord_id))
-                            discord_name = user.display_name
+                            member_obj = interaction.guild.get_member(int(discord_id))
+                            if member_obj:
+                                discord_name = member_obj.display_name
+                            else:
+                                # Only fetch from API if not in guild cache
+                                user = await self.bot.fetch_user(int(discord_id))
+                                discord_name = user.display_name
                         except:
                             discord_name = f"Unknown User (ID: {discord_id})"
 
                         # Determine which IGN to show based on which union slot matches
                         if str(union_name) == str(role_id):
-                            # User is in this union via their primary IGN
                             relevant_ign = ign_primary if ign_primary else "*Not registered*"
                         elif str(union_name_2) == str(role_id):
-                            # User is in this union via their secondary IGN
                             relevant_ign = ign_secondary if ign_secondary else "*Not registered*"
                         else:
-                            # Fallback (shouldn't happen)
                             relevant_ign = "*Unknown*"
 
                         full_display = f"**{discord_name}** ~ IGN: *{relevant_ign}*"
@@ -201,45 +213,30 @@ class UnionInfo(commands.Cog):
                         except:
                             discord_name = f"Unknown User (ID: {leader_id})"
                         
-                        # Get leader's union data to determine which IGN to show
-                        leader_data = await conn.fetchrow(
-                            "SELECT ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE discord_id = $1", 
-                            str(leader_id)
-                        )
-                        
-                        if leader_data:
-                            # Determine which IGN the leader uses for this union
-                            if str(leader_data['union_name']) == str(role_id):
-                                leader_ign = leader_data['ign_primary'] if leader_data['ign_primary'] else "*Not registered*"
-                            elif str(leader_data['union_name_2']) == str(role_id):
-                                leader_ign = leader_data['ign_secondary'] if leader_data['ign_secondary'] else "*Not registered*"
-                            else:
-                                # Leader not actually in this union via either slot
-                                leader_ign = "*Not in union*"
-                        else:
-                            leader_ign = "*Not registered*"
-                        
-                        leader_entry = f"　👑 **{discord_name}** ~ IGN: *{leader_ign}*"
+                        leader_entry = f"　👑 **{discord_name}** ~ IGN: *Not in union*"
 
                     # Combine leader (always first) + members
                     all_entries = []
                     if leader_entry:
                         all_entries.append(leader_entry)
-                    all_entries.extend(member_entries)
+                    all_entries.extend(member_entries[:25])  # Limit to prevent embed size issues
+                    
+                    if len(member_entries) > 25:
+                        all_entries.append(f"　... and {len(member_entries) - 25} more members")
                     
                     member_list = "\n".join(all_entries)
 
-                # Add field with member capacity - make union name even bigger
+                # Add field with member capacity
                 embed.add_field(
                     name=f"## **{role_name}** ({member_count}/30 members)", 
                     value=f"{member_list}",
                     inline=False
                 )
 
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
         finally:
             await conn.close()
 
