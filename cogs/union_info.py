@@ -539,7 +539,12 @@ class UnionInfo(commands.Cog):
                 
                 # Add overall statistics
                 total_unions = len(unions)
-                total_members = sum(len(await conn.fetch("SELECT discord_id FROM users WHERE union_name = $1 OR union_name_2 = $1", str(int(u['role_id'])))) for u in unions)
+                # Calculate total members properly
+                total_members = 0
+                for union_row in unions:
+                    role_id = int(union_row['role_id'])
+                    members = await conn.fetch("SELECT discord_id FROM users WHERE union_name = $1 OR union_name_2 = $1", str(role_id))
+                    total_members += len(members)
                 
                 embed.add_field(
                     name="📊 **SUMMARY**",
