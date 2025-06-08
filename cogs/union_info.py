@@ -457,6 +457,105 @@ class UnionInfo(commands.Cog):
                 await interaction.followup.send("❌ No unions found.")
                 return
 
+            if not show_members:
+                # Count-only mode - create one consolidated embed
+                embed = discord.Embed(
+                    title="🏛️ **UNION OVERVIEW (COUNT ONLY)**",
+                    description="*Quick summary of all unions with member counts and leaders*",
+                    color=0x7B68EE
+                )
+                
+                union_summaries = []
+                
+                for union_row in unions:
+                    role_id = int(union_row['role_id'])
+                    
+                    # Get the Discord role
+                    role = interaction.guild.get_role(role_id)
+                    role_name = role.name if role else f"Unknown Role (ID: {role_id})"
+
+                    # Get union leader
+                    leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", role_id)
+                    leader_id = leader_row['user_id'] if leader_row else None
+
+                    # Get member count
+                    members = await conn.fetch("""
+                        SELECT discord_id FROM users
+                        WHERE union_name = $1 OR union_name_2 = $1
+                    """, str(role_id))
+                    
+                    member_count = len(members)
+                    
+                    # Add leader to count if not in members table
+                    if leader_id and not any(str(member['discord_id']) == str(leader_id) for member in members):
+                        member_count += 1
+                    
+                    # Get leader name
+                    if leader_id:
+                        try:
+                            leader_user = await self.bot.fetch_user(int(leader_id))
+                            leader_name = f"👑 {leader_user.display_name}"
+                        except:
+                            leader_name = f"👑 Unknown Leader"
+                    else:
+                        leader_name = "🔍 *No leader assigned*"
+                    
+                    # Create summary line
+                    union_summaries.append(f"**{role_name}** ({member_count}/30)\n{leader_name}")
+                
+                # Split summaries into fields to avoid character limits
+                current_field = []
+                current_length = 0
+                field_number = 1
+                
+                for summary in union_summaries:
+                    summary_length = len(summary) + 2  # +2 for spacing
+                    
+                    if current_length + summary_length > 900 and current_field:  # Leave buffer
+                        # Add current field
+                        field_name = "Unions" if field_number == 1 else f"Unions (Part {field_number})"
+                        embed.add_field(
+                            name=field_name,
+                            value="\n\n".join(current_field),
+                            inline=True
+                        )
+                        
+                        # Start new field
+                        current_field = [summary]
+                        current_length = summary_length
+                        field_number += 1
+                    else:
+                        current_field.append(summary)
+                        current_length += summary_length
+                
+                # Add remaining summaries
+                if current_field:
+                    field_name = "Unions" if field_number == 1 else f"Unions (Part {field_number})"
+                    embed.add_field(
+                        name=field_name,
+                        value="\n\n".join(current_field),
+                        inline=True
+                    )
+                
+                # Add overall statistics
+                total_unions = len(unions)
+                total_members = sum(len(await conn.fetch("SELECT discord_id FROM users WHERE union_name = $1 OR union_name_2 = $1", str(int(u['role_id'])))) for u in unions)
+                
+                embed.add_field(
+                    name="📊 **SUMMARY**",
+                    value=f"**Total Unions:** {total_unions}\n**Total Members:** {total_members}\n**Use `show_members:True` for full lists**",
+                    inline=False
+                )
+                
+                # Send single consolidated message
+                if union_name:
+                    await interaction.followup.send(f"🔍 **Union Search Result for '{union_name}' (Count Only)**", embed=embed)
+                else:
+                    await interaction.followup.send(embed=embed)
+                
+                return
+
+            # Original detailed mode with member lists
             # Create embed(s) with 35 line restriction per union
             embeds = []
             
