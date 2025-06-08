@@ -7,6 +7,149 @@ class UnionInfo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    def has_admin_role(self, member):
+        """Check if member has admin or mod+ role"""
+        admin_roles = ["admin", "mod+"]
+        return any(role.name.lower() in admin_roles for role in member.roles)
+
+    @app_commands.command(name="initialize_user_list", description="Verify and clean up user database - remove users who left Discord (Admin only)")
+    async def initialize_user_list(self, interaction: discord.Interaction):
+        if not self.has_admin_role(interaction.user):
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=True)
+            return
+
+        # Defer the response as this might take a while
+        await interaction.response.defer(ephemeral=True)
+        
+        conn = await get_connection()
+        try:
+            # Get all users from database
+            all_users = await conn.fetch("SELECT discord_id, username, ign_primary, ign_secondary, union_name, union_name_2 FROM users ORDER BY discord_id")
+            
+            if not all_users:
+                await interaction.followup.send("❌ No users found in database.", ephemeral=True)
+                return
+
+            # Track statistics
+            total_users = len(all_users)
+            users_still_in_guild = 0
+            users_left_guild = 0
+            leaders_affected = 0
+            cleanup_actions = []
+            
+            # Check each user
+            for user_record in all_users:
+                discord_id = user_record['discord_id']
+                username = user_record['username']
+                ign_primary = user_record['ign_primary']
+                ign_secondary = user_record['ign_secondary']
+                union_name = user_record['union_name']
+                union_name_2 = user_record['union_name_2']
+                
+                # Check if user is still in the guild
+                member = interaction.guild.get_member(int(discord_id))
+                
+                if member:
+                    # User is still in guild
+                    users_still_in_guild += 1
+                else:
+                    # User has left the guild - needs cleanup
+                    users_left_guild += 1
+                    
+                    # Check if this user was a union leader
+                    leader_check = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(discord_id))
+                    if leader_check:
+                        leaders_affected += 1
+                        
+                        # Remove from leadership
+                        await conn.execute("DELETE FROM union_leaders WHERE user_id = $1", int(discord_id))
+                        
+                        # Get role names for logging
+                        role_names = []
+                        if leader_check['role_id']:
+                            role = interaction.guild.get_role(leader_check['role_id'])
+                            role_names.append(role.name if role else f"Role ID: {leader_check['role_id']}")
+                        if leader_check['role_id_2']:
+                            role = interaction.guild.get_role(leader_check['role_id_2'])
+                            role_names.append(role.name if role else f"Role ID: {leader_check['role_id_2']}")
+                        
+                        cleanup_actions.append(f"👑 **Leader removed:** {username} (ID: {discord_id}) from {' & '.join(role_names)}")
+                    
+                    # Remove user from database entirely
+                    await conn.execute("DELETE FROM users WHERE discord_id = $1", discord_id)
+                    
+                    # Log the cleanup action
+                    ign_display = []
+                    if ign_primary:
+                        ign_display.append(f"Primary: {ign_primary}")
+                    if ign_secondary:
+                        ign_display.append(f"Secondary: {ign_secondary}")
+                    ign_text = f" ({' | '.join(ign_display)})" if ign_display else ""
+                    
+                    union_display = []
+                    if union_name:
+                        role = interaction.guild.get_role(int(union_name)) if union_name.isdigit() else None
+                        union_display.append(role.name if role else union_name)
+                    if union_name_2:
+                        role = interaction.guild.get_role(int(union_name_2)) if union_name_2.isdigit() else None
+                        union_display.append(role.name if role else union_name_2)
+                    union_text = f" from {' & '.join(union_display)}" if union_display else ""
+                    
+                    cleanup_actions.append(f"👤 **User removed:** {username} (ID: {discord_id}){ign_text}{union_text}")
+
+            # Create summary embed
+            embed = discord.Embed(
+                title="🔧 **DATABASE CLEANUP COMPLETE**",
+                description="*Verified all users and removed those who left Discord*",
+                color=0x00FF00 if users_left_guild == 0 else 0xFFA500
+            )
+            
+            # Add statistics
+            embed.add_field(
+                name="📊 **STATISTICS**",
+                value=f"**Total users checked:** {total_users}\n"
+                      f"**Users still in Discord:** {users_still_in_guild}\n"
+                      f"**Users who left Discord:** {users_left_guild}\n"
+                      f"**Leaders affected:** {leaders_affected}",
+                inline=False
+            )
+            
+            # Add cleanup actions if any
+            if cleanup_actions:
+                # Split cleanup actions into chunks to avoid embed limits
+                action_text = "\n".join(cleanup_actions[:15])  # Show first 15 actions
+                if len(cleanup_actions) > 15:
+                    action_text += f"\n... and {len(cleanup_actions) - 15} more actions"
+                
+                embed.add_field(
+                    name="🧹 **CLEANUP ACTIONS**",
+                    value=action_text,
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="✅ **NO CLEANUP NEEDED**",
+                    value="All users in database are still active in Discord!",
+                    inline=False
+                )
+            
+            # Add recommendations
+            if leaders_affected > 0:
+                embed.add_field(
+                    name="⚠️ **ATTENTION NEEDED**",
+                    value=f"**{leaders_affected} union leader(s) were removed.** Use `/appoint_union_leader` to assign new leaders for affected unions.",
+                    inline=False
+                )
+            
+            embed.set_footer(text="Run this command periodically to keep the database clean")
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error during cleanup: {str(e)}", ephemeral=True)
+        finally:
+            await conn.close()
+
     @app_commands.command(name="show_union_leader", description="Show all union leaders and their assignments")
     async def show_union_leader(self, interaction: discord.Interaction):
         # Defer the response immediately to prevent timeout
