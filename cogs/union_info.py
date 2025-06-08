@@ -84,22 +84,54 @@ class UnionInfo(commands.Cog):
         finally:
             await conn.close()
 
-    @app_commands.command(name="show_union_detail", description="Show all unions with member lists - no truncation")
-    async def show_union_detail(self, interaction: discord.Interaction):
+    @app_commands.command(name="show_union_detail", description="Show all unions with member lists in embed format")
+    @app_commands.describe(union_name="Optional: Specific union name to show (case insensitive)")
+    async def show_union_detail(self, interaction: discord.Interaction, union_name: str = None):
         # Defer the response immediately to prevent timeout
         await interaction.response.defer()
         
         conn = await get_connection()
         try:
-            unions = await conn.fetch("SELECT role_id FROM union_roles ORDER BY role_id")
+            # If union_name is provided, search for specific union (case insensitive)
+            if union_name:
+                # Get all registered unions from database
+                all_unions = await conn.fetch("SELECT role_id FROM union_roles ORDER BY role_id")
+                
+                # Find matching union by name (case insensitive) - only from registered unions
+                matching_union = None
+                available_unions = []
+                
+                for union_row in all_unions:
+                    role_id = int(union_row['role_id'])
+                    role = interaction.guild.get_role(role_id)
+                    if role:
+                        available_unions.append(role.name)  # Track available unions for error message
+                        if union_name.lower() in role.name.lower():
+                            matching_union = union_row
+                            break
+                
+                if not matching_union:
+                    union_list = "\n".join([f"• {name}" for name in available_unions[:10]])  # Show up to 10
+                    if len(available_unions) > 10:
+                        union_list += f"\n... and {len(available_unions) - 10} more"
+                    
+                    await interaction.followup.send(
+                        f"❌ No registered union found matching **{union_name}**\n\n"
+                        f"**Available registered unions:**\n{union_list}\n\n"
+                        f"Use `/show_union_detail` without parameters to see all unions."
+                    )
+                    return
+                
+                unions = [matching_union]  # Only process the matching union
+            else:
+                unions = await conn.fetch("SELECT role_id FROM union_roles ORDER BY role_id")
 
             if not unions:
                 await interaction.followup.send("❌ No unions found.")
                 return
 
-            # Split into multiple messages if needed to avoid Discord limits
-            messages = []
-            current_message = ""
+            # Create embed(s) with 35 line restriction per union
+            embeds = []
             
             for union_row in unions:
                 role_id = int(union_row['role_id'])
@@ -112,7 +144,7 @@ class UnionInfo(commands.Cog):
                 leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", role_id)
                 leader_id = leader_row['user_id'] if leader_row else None
 
-                # Get ALL members - no limit
+                # Get ALL members
                 members = await conn.fetch("""
                     SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2
                     FROM users
@@ -130,7 +162,12 @@ class UnionInfo(commands.Cog):
                     if not leader_in_members:
                         member_count += 1
 
-                union_text = f"\n# **{role_name}** ({member_count}/30 members)\n"
+                # Create embed for this union
+                embed = discord.Embed(
+                    title=f"🏛️ **{role_name}**", 
+                    description=f"*Union Members ({member_count}/30)*",
+                    color=0x7B68EE  # Purple color
+                )
 
                 if member_count == 0:
                     if leader_id:
@@ -159,11 +196,13 @@ class UnionInfo(commands.Cog):
                             member_list = f"👑 **Unknown Leader**\n\n*No other members*"
                     else:
                         member_list = "🔍 **No leader assigned**\n🔍 **No members**\n\n*Use `/appoint_union_leader` to assign a leader*"
+                    
+                    embed.add_field(name="Members", value=member_list, inline=False)
                 else:
                     member_entries = []
                     leader_entry = None
                     
-                    # Process ALL members - no truncation
+                    # Process members
                     for record in members:
                         discord_id = record['discord_id']
                         ign_primary = record['ign_primary']
@@ -208,40 +247,44 @@ class UnionInfo(commands.Cog):
                         
                         leader_entry = f"👑 **{discord_name}** ~ IGN: *Not in union*"
 
-                    # Combine leader (always first) + ALL members
+                    # Combine leader + members with 35 line limit
                     all_entries = []
                     if leader_entry:
                         all_entries.append(leader_entry)
-                    all_entries.extend(member_entries)  # NO TRUNCATION
+                    
+                    # Apply 35 line restriction (subtract 1 for leader if present)
+                    max_members = 34 if leader_entry else 35
+                    all_entries.extend(member_entries[:max_members])
+                    
+                    # Add truncation notice if needed
+                    if len(member_entries) > max_members:
+                        remaining = len(member_entries) - max_members
+                        all_entries.append(f"\n*... and {remaining} more members (35 line limit)*")
                     
                     member_list = "\n".join(all_entries)
+                    embed.add_field(name="Members", value=member_list, inline=False)
 
-                union_text += member_list + "\n"
-                
-                # Check if adding this union would exceed Discord's message limit (2000 chars)
-                if len(current_message + union_text) > 1900:  # Leave some buffer
-                    if current_message:
-                        messages.append(current_message)
-                    current_message = union_text
-                else:
-                    current_message += union_text
+                embeds.append(embed)
             
-            # Add any remaining content
-            if current_message:
-                messages.append(current_message)
-            
-            # Send all messages
-            if not messages:
+            # Send embeds
+            if not embeds:
                 await interaction.followup.send("❌ No union data found.")
                 return
             
-            # Send first message with title
-            first_message = f"🏛️ **UNION OVERVIEW**\n*Complete list of all registered unions with their leaders and members*\n{messages[0]}"
-            await interaction.followup.send(first_message)
+            # Send first embed with appropriate message
+            if union_name:
+                await interaction.followup.send(f"🔍 **Union Search Result for '{union_name}'**", embed=embeds[0])
+            else:
+                await interaction.followup.send(f"🏛️ **Union Overview** ({len(embeds)} unions)", embed=embeds[0])
             
-            # Send additional messages if needed
-            for i, message in enumerate(messages[1:], 2):
-                await interaction.followup.send(f"🏛️ **UNION OVERVIEW (Part {i})**\n{message}")
+            # Send additional embeds if showing all unions
+            for i, embed in enumerate(embeds[1:], 2):
+                await interaction.followup.send(f"🏛️ **Union Overview (Part {i})**", embed=embed)
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+        finally:
+            await conn.close()
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
