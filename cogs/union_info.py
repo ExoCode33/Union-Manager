@@ -58,6 +58,7 @@ class UnionInfo(commands.Cog):
                     
                     # Check if this user was a union leader
                     leader_check = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(discord_id))
+                    was_leader = leader_check is not None
                     if leader_check:
                         leaders_affected += 1
                         
@@ -74,6 +75,12 @@ class UnionInfo(commands.Cog):
                             role_names.append(role.name if role else f"Role ID: {leader_check['role_id_2']}")
                         
                         cleanup_actions.append(f"👑 **Leader removed:** {username} (ID: {discord_id}) from {' & '.join(role_names)}")
+                    
+                    # Log cleanup to history table before removing user
+                    await conn.execute("""
+                        INSERT INTO cleanup_history (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2, was_leader, cleanup_date, admin_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+                    """, discord_id, username, ign_primary, ign_secondary, union_name, union_name_2, was_leader, str(interaction.user.id))
                     
                     # Remove user from database entirely
                     await conn.execute("DELETE FROM users WHERE discord_id = $1", discord_id)
@@ -147,12 +154,180 @@ class UnionInfo(commands.Cog):
                     inline=False
                 )
             
-            embed.set_footer(text="Run this command periodically to keep the database clean")
+            embed.set_footer(text="Run this command periodically to keep the database clean • Use /show_cleanup_history to view removed users")
             
             await interaction.followup.send(embed=embed, ephemeral=True)
             
         except Exception as e:
             await interaction.followup.send(f"❌ Error during cleanup: {str(e)}", ephemeral=True)
+        finally:
+            await conn.close()
+
+    @app_commands.command(name="show_cleanup_history", description="Show the last 50 members removed by database cleanup (Admin only)")
+    async def show_cleanup_history(self, interaction: discord.Interaction):
+        if not self.has_admin_role(interaction.user):
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=True)
+            return
+
+        # Defer the response
+        await interaction.response.defer(ephemeral=True)
+        
+        conn = await get_connection()
+        try:
+            # Ensure cleanup_history table exists
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS cleanup_history (
+                    id SERIAL PRIMARY KEY,
+                    discord_id TEXT NOT NULL,
+                    username TEXT,
+                    ign_primary TEXT,
+                    ign_secondary TEXT,
+                    union_name TEXT,
+                    union_name_2 TEXT,
+                    was_leader BOOLEAN DEFAULT FALSE,
+                    cleanup_date TIMESTAMP DEFAULT NOW(),
+                    admin_id TEXT
+                )
+            """)
+            
+            # Get last 50 cleanup records
+            cleanup_records = await conn.fetch("""
+                SELECT discord_id, username, ign_primary, ign_secondary, union_name, union_name_2, 
+                       was_leader, cleanup_date, admin_id
+                FROM cleanup_history 
+                ORDER BY cleanup_date DESC 
+                LIMIT 50
+            """)
+            
+            if not cleanup_records:
+                embed = discord.Embed(
+                    title="📋 **CLEANUP HISTORY**",
+                    description="*No cleanup history found.*\n\nUsers will appear here after running `/initialize_user_list`",
+                    color=0x808080
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+            
+            # Create main embed
+            embed = discord.Embed(
+                title="📋 **CLEANUP HISTORY**",
+                description=f"*Last {len(cleanup_records)} members removed from database*",
+                color=0xFF6B6B
+            )
+            
+            # Group records for display
+            current_entries = []
+            current_length = 0
+            field_number = 1
+            
+            for i, record in enumerate(cleanup_records, 1):
+                discord_id = record['discord_id']
+                username = record['username'] or f"User_{discord_id}"
+                ign_primary = record['ign_primary']
+                ign_secondary = record['ign_secondary']
+                union_name = record['union_name']
+                union_name_2 = record['union_name_2']
+                was_leader = record['was_leader']
+                cleanup_date = record['cleanup_date']
+                admin_id = record['admin_id']
+                
+                # Format IGNs
+                ign_parts = []
+                if ign_primary:
+                    ign_parts.append(f"Primary: {ign_primary}")
+                if ign_secondary:
+                    ign_parts.append(f"Secondary: {ign_secondary}")
+                ign_text = f" ({' | '.join(ign_parts)})" if ign_parts else ""
+                
+                # Format unions
+                union_parts = []
+                if union_name:
+                    try:
+                        role = interaction.guild.get_role(int(union_name)) if union_name.isdigit() else None
+                        union_parts.append(role.name if role else union_name)
+                    except:
+                        union_parts.append(union_name)
+                if union_name_2:
+                    try:
+                        role = interaction.guild.get_role(int(union_name_2)) if union_name_2.isdigit() else None
+                        union_parts.append(role.name if role else union_name_2)
+                    except:
+                        union_parts.append(union_name_2)
+                union_text = f" from **{' & '.join(union_parts)}**" if union_parts else ""
+                
+                # Format admin who performed cleanup
+                try:
+                    admin_user = await self.bot.fetch_user(int(admin_id))
+                    admin_name = admin_user.display_name
+                except:
+                    admin_name = f"Admin_{admin_id}"
+                
+                # Format date
+                date_str = cleanup_date.strftime("%b %d, %Y %H:%M")
+                
+                # Create entry
+                leader_icon = "👑" if was_leader else "👤"
+                entry = f"**{i}.** {leader_icon} **{username}**{ign_text}{union_text}\n    🗓️ {date_str} by {admin_name}"
+                
+                entry_length = len(entry) + 2  # +2 for newlines
+                
+                # Check if we need to start a new field
+                if current_length + entry_length > 950 and current_entries:  # Leave buffer for Discord limits
+                    # Add current entries as a field
+                    field_name = "Removed Members" if field_number == 1 else f"Removed Members (Part {field_number})"
+                    embed.add_field(
+                        name=field_name,
+                        value="\n\n".join(current_entries),
+                        inline=False
+                    )
+                    
+                    # Start new field
+                    current_entries = [entry]
+                    current_length = entry_length
+                    field_number += 1
+                else:
+                    # Add to current field
+                    current_entries.append(entry)
+                    current_length += entry_length
+            
+            # Add any remaining entries
+            if current_entries:
+                field_name = "Removed Members" if field_number == 1 else f"Removed Members (Part {field_number})"
+                embed.add_field(
+                    name=field_name,
+                    value="\n\n".join(current_entries),
+                    inline=False
+                )
+            
+            # Add summary statistics
+            total_leaders = sum(1 for record in cleanup_records if record['was_leader'])
+            total_members = len(cleanup_records) - total_leaders
+            
+            embed.add_field(
+                name="📊 **SUMMARY**",
+                value=f"**Total Removed:** {len(cleanup_records)}\n"
+                      f"**Leaders:** {total_leaders}\n"
+                      f"**Members:** {total_members}",
+                inline=True
+            )
+            
+            # Add oldest and newest dates
+            if cleanup_records:
+                oldest_date = cleanup_records[-1]['cleanup_date'].strftime("%b %d, %Y")
+                newest_date = cleanup_records[0]['cleanup_date'].strftime("%b %d, %Y")
+                
+                embed.add_field(
+                    name="📅 **DATE RANGE**",
+                    value=f"**Newest:** {newest_date}\n**Oldest:** {oldest_date}",
+                    inline=True
+                )
+            
+            embed.set_footer(text="👑 = Former Leader • 👤 = Member • Use /initialize_user_list to cleanup database")
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error retrieving cleanup history: {str(e)}", ephemeral=True)
         finally:
             await conn.close()
 
@@ -421,7 +596,7 @@ class UnionInfo(commands.Cog):
                         # If adding this entry would exceed 1000 chars (leave buffer), start new field
                         if current_length + entry_length > 1000 and current_chunk:
                             # Add current chunk as a field
-                            field_name = "Members" if field_number == 1 else f"Members (continued {field_number})"
+                            field_name = "‎" if field_number > 1 else "Members"  # Use invisible character for continuation fields
                             embed.add_field(
                                 name=field_name, 
                                 value="\n".join(current_chunk), 
@@ -439,7 +614,7 @@ class UnionInfo(commands.Cog):
                     
                     # Add remaining entries as final field
                     if current_chunk:
-                        field_name = "Members" if field_number == 1 else f"Members (continued {field_number})"
+                        field_name = "‎" if field_number > 1 else "Members"  # Use invisible character for continuation fields
                         embed.add_field(
                             name=field_name, 
                             value="\n".join(current_chunk), 
