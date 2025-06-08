@@ -79,7 +79,7 @@ class UnionInfo(commands.Cog):
                     # Log cleanup to history table before removing user
                     await conn.execute("""
                         INSERT INTO cleanup_history (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2, was_leader, cleanup_date, admin_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8)
                     """, discord_id, username, ign_primary, ign_secondary, union_name, union_name_2, was_leader, str(interaction.user.id))
                     
                     # Remove user from database entirely
@@ -185,7 +185,7 @@ class UnionInfo(commands.Cog):
                     union_name TEXT,
                     union_name_2 TEXT,
                     was_leader BOOLEAN DEFAULT FALSE,
-                    cleanup_date TIMESTAMP DEFAULT NOW(),
+                    cleanup_date DATE DEFAULT CURRENT_DATE,
                     admin_id TEXT
                 )
             """)
@@ -262,8 +262,8 @@ class UnionInfo(commands.Cog):
                 except:
                     admin_name = f"Admin_{admin_id}"
                 
-                # Format date
-                date_str = cleanup_date.strftime("%b %d, %Y %H:%M")
+                # Format date (since we're using DATE type, no time component)
+                date_str = cleanup_date.strftime("%b %d, %Y")
                 
                 # Create entry
                 leader_icon = "👑" if was_leader else "👤"
