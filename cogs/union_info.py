@@ -409,8 +409,11 @@ class UnionInfo(commands.Cog):
             await conn.close()
 
     @app_commands.command(name="show_union_detail", description="Show all unions with member lists in embed format")
-    @app_commands.describe(union_name="Optional: Specific union name to show (case insensitive)")
-    async def show_union_detail(self, interaction: discord.Interaction, union_name: str = None):
+    @app_commands.describe(
+        union_name="Optional: Specific union name to show (case insensitive)",
+        show_members="Optional: Show member list (default: True)"
+    )
+    async def show_union_detail(self, interaction: discord.Interaction, union_name: str = None, show_members: bool = True):
         # Defer the response immediately to prevent timeout
         await interaction.response.defer()
         
@@ -493,7 +496,34 @@ class UnionInfo(commands.Cog):
                     color=0x7B68EE  # Purple color
                 )
 
-                if member_count == 0:
+                if not show_members:
+                    # Only show count, no member list
+                    if leader_id:
+                        try:
+                            leader_user = await self.bot.fetch_user(int(leader_id))
+                            leader_name = leader_user.display_name
+                        except:
+                            leader_name = f"Unknown Leader (ID: {leader_id})"
+                        
+                        embed.add_field(
+                            name="👑 Leader", 
+                            value=f"**{leader_name}**", 
+                            inline=True
+                        )
+                    else:
+                        embed.add_field(
+                            name="👑 Leader", 
+                            value="*No leader assigned*", 
+                            inline=True
+                        )
+                    
+                    embed.add_field(
+                        name="📊 Summary", 
+                        value=f"**Total Members:** {member_count}\n**Member List:** Hidden", 
+                        inline=True
+                    )
+                    
+                elif member_count == 0:
                     if leader_id:
                         try:
                             leader_user = await self.bot.fetch_user(int(leader_id))
@@ -648,13 +678,22 @@ class UnionInfo(commands.Cog):
             
             # Send first embed with appropriate message
             if union_name:
-                await interaction.followup.send(f"🔍 **Union Search Result for '{union_name}'**", embed=embeds[0])
+                if show_members:
+                    await interaction.followup.send(f"🔍 **Union Search Result for '{union_name}'**", embed=embeds[0])
+                else:
+                    await interaction.followup.send(f"🔍 **Union Search Result for '{union_name}' (Count Only)**", embed=embeds[0])
             else:
-                await interaction.followup.send(f"🏛️ **Union Overview** ({len(embeds)} unions)", embed=embeds[0])
+                if show_members:
+                    await interaction.followup.send(f"🏛️ **Union Overview** ({len(embeds)} unions)", embed=embeds[0])
+                else:
+                    await interaction.followup.send(f"🏛️ **Union Overview (Count Only)** ({len(embeds)} unions)", embed=embeds[0])
             
             # Send additional embeds if showing all unions
             for i, embed in enumerate(embeds[1:], 2):
-                await interaction.followup.send(f"🏛️ **Union Overview (Part {i})**", embed=embed)
+                if show_members:
+                    await interaction.followup.send(f"🏛️ **Union Overview (Part {i})**", embed=embed)
+                else:
+                    await interaction.followup.send(f"🏛️ **Union Overview (Count Only - Part {i})**", embed=embed)
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
