@@ -88,11 +88,17 @@ class UnionInfo(commands.Cog):
                     
                     union_display = []
                     if union_name:
-                        role = interaction.guild.get_role(int(union_name)) if union_name.isdigit() else None
-                        union_display.append(role.name if role else union_name)
+                        try:
+                            role = interaction.guild.get_role(int(union_name)) if union_name.isdigit() else None
+                            union_display.append(role.name if role else union_name)
+                        except:
+                            union_display.append(union_name)
                     if union_name_2:
-                        role = interaction.guild.get_role(int(union_name_2)) if union_name_2.isdigit() else None
-                        union_display.append(role.name if role else union_name_2)
+                        try:
+                            role = interaction.guild.get_role(int(union_name_2)) if union_name_2.isdigit() else None
+                            union_display.append(role.name if role else union_name_2)
+                        except:
+                            union_display.append(union_name_2)
                     union_text = f" from {' & '.join(union_display)}" if union_display else ""
                     
                     cleanup_actions.append(f"👤 **User removed:** {username} (ID: {discord_id}){ign_text}{union_text}")
@@ -423,11 +429,6 @@ class UnionInfo(commands.Cog):
             # Send additional embeds if showing all unions
             for i, embed in enumerate(embeds[1:], 2):
                 await interaction.followup.send(f"🏛️ **Union Overview (Part {i})**", embed=embed)
-
-        except Exception as e:
-            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
-        finally:
-            await conn.close()
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
