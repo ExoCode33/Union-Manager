@@ -585,41 +585,59 @@ class UnionInfo(commands.Cog):
                         remaining = len(member_entries) - max_members
                         all_entries.append(f"\n*... and {remaining} more members (35 line limit)*")
                     
-                    # Split into chunks to respect Discord's 1024 character limit per field
-                    current_chunk = []
-                    current_length = 0
-                    field_number = 1
+                    # Combine leader + members with character limit handling
+                    all_entries = []
+                    if leader_entry:
+                        all_entries.append(leader_entry)
                     
-                    for entry in all_entries:
-                        entry_length = len(entry) + 1  # +1 for newline
+                    # Apply 35 line restriction (subtract 1 for leader if present)
+                    max_members = 34 if leader_entry else 35
+                    all_entries.extend(member_entries[:max_members])
+                    
+                    # Add truncation notice if needed
+                    if len(member_entries) > max_members:
+                        remaining = len(member_entries) - max_members
+                        all_entries.append(f"\n*... and {remaining} more members (35 line limit)*")
+                    
+                    # Try to fit everything in one field first
+                    full_member_list = "\n".join(all_entries)
+                    
+                    if len(full_member_list) <= 1024:
+                        # Fits in one field
+                        embed.add_field(name="Members", value=full_member_list, inline=False)
+                    else:
+                        # Need to split, but minimize visible gaps
+                        current_chunk = []
+                        current_length = 0
+                        field_count = 0
                         
-                        # If adding this entry would exceed 1000 chars (leave buffer), start new field
-                        if current_length + entry_length > 1000 and current_chunk:
-                            # Add current chunk as a field
-                            field_name = "‎" if field_number > 1 else "Members"  # Use invisible character for continuation fields
-                            embed.add_field(
-                                name=field_name, 
-                                value="\n".join(current_chunk), 
-                                inline=False
-                            )
+                        for entry in all_entries:
+                            entry_length = len(entry) + 1  # +1 for newline
                             
-                            # Start new chunk
-                            current_chunk = [entry]
-                            current_length = entry_length
-                            field_number += 1
-                        else:
-                            # Add to current chunk
-                            current_chunk.append(entry)
-                            current_length += entry_length
-                    
-                    # Add remaining entries as final field
-                    if current_chunk:
-                        field_name = "‎" if field_number > 1 else "Members"  # Use invisible character for continuation fields
-                        embed.add_field(
-                            name=field_name, 
-                            value="\n".join(current_chunk), 
-                            inline=False
-                        )
+                            # If adding this entry would exceed limit, save current chunk
+                            if current_length + entry_length > 1000 and current_chunk:
+                                field_count += 1
+                                if field_count == 1:
+                                    embed.add_field(name="Members", value="\n".join(current_chunk), inline=False)
+                                else:
+                                    # Use minimal spacing for continuation
+                                    embed.add_field(name="\u200b", value="\n".join(current_chunk), inline=False)
+                                
+                                # Start new chunk
+                                current_chunk = [entry]
+                                current_length = entry_length
+                            else:
+                                # Add to current chunk
+                                current_chunk.append(entry)
+                                current_length += entry_length
+                        
+                        # Add remaining entries
+                        if current_chunk:
+                            field_count += 1
+                            if field_count == 1:
+                                embed.add_field(name="Members", value="\n".join(current_chunk), inline=False)
+                            else:
+                                embed.add_field(name="\u200b", value="\n".join(current_chunk), inline=False)
 
                 embeds.append(embed)
             
