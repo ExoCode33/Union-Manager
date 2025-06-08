@@ -84,7 +84,7 @@ class UnionInfo(commands.Cog):
         finally:
             await conn.close()
 
-    @app_commands.command(name="show_union_detail", description="Show all unions with member lists and crown emojis")
+    @app_commands.command(name="show_union_detail", description="Show all unions with member lists - no truncation")
     async def show_union_detail(self, interaction: discord.Interaction):
         # Defer the response immediately to prevent timeout
         await interaction.response.defer()
@@ -97,13 +97,10 @@ class UnionInfo(commands.Cog):
                 await interaction.followup.send("❌ No unions found.")
                 return
 
-            embed = discord.Embed(
-                title="🏛️ **UNION OVERVIEW**", 
-                description="*Complete list of all registered unions with their leaders and members*",
-                color=0x7B68EE  # Purple color
-            )
-
-            # Process unions in batches to avoid timeout
+            # Split into multiple messages if needed to avoid Discord limits
+            messages = []
+            current_message = ""
+            
             for union_row in unions:
                 role_id = int(union_row['role_id'])
                 
@@ -111,17 +108,16 @@ class UnionInfo(commands.Cog):
                 role = interaction.guild.get_role(role_id)
                 role_name = role.name if role else f"Unknown Role (ID: {role_id})"
 
-                # Get union leader (simplified query)
+                # Get union leader
                 leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", role_id)
                 leader_id = leader_row['user_id'] if leader_row else None
 
-                # Get all members (optimized query)
+                # Get ALL members - no limit
                 members = await conn.fetch("""
                     SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2
                     FROM users
                     WHERE union_name = $1 OR union_name_2 = $1
                     ORDER BY discord_id
-                    LIMIT 30
                 """, str(role_id))
 
                 # Count total members
@@ -134,13 +130,15 @@ class UnionInfo(commands.Cog):
                     if not leader_in_members:
                         member_count += 1
 
+                union_text = f"\n# **{role_name}** ({member_count}/30 members)\n"
+
                 if member_count == 0:
                     if leader_id:
                         try:
                             leader_user = await self.bot.fetch_user(int(leader_id))
                             discord_name = leader_user.display_name
                             
-                            # Get leader IGN (simplified)
+                            # Get leader IGN
                             leader_igns = await conn.fetchrow(
                                 "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
                                 str(leader_id)
@@ -156,19 +154,16 @@ class UnionInfo(commands.Cog):
                             else:
                                 leader_display = f"**{discord_name}** ~ IGN: *Not registered*"
                             
-                            member_list = f"　👑 {leader_display}\n\n　　*No other members*"
-                            member_count = 1
+                            member_list = f"👑 {leader_display}\n\n*No other members*"
                         except:
-                            member_list = f"　👑 **Unknown Leader**\n\n　　*No other members*"
-                            member_count = 1
+                            member_list = f"👑 **Unknown Leader**\n\n*No other members*"
                     else:
-                        member_list = "　🔍 **No leader assigned**\n　🔍 **No members**\n\n　　*Use `/appoint_union_leader` to assign a leader*"
-                        member_count = 0
+                        member_list = "🔍 **No leader assigned**\n🔍 **No members**\n\n*Use `/appoint_union_leader` to assign a leader*"
                 else:
                     member_entries = []
                     leader_entry = None
                     
-                    # Process members efficiently
+                    # Process ALL members - no truncation
                     for record in members:
                         discord_id = record['discord_id']
                         ign_primary = record['ign_primary']
@@ -176,13 +171,12 @@ class UnionInfo(commands.Cog):
                         union_name = record['union_name']
                         union_name_2 = record['union_name_2']
 
-                        # Use cached guild member if possible, fallback to API
+                        # Get Discord name
                         try:
                             member_obj = interaction.guild.get_member(int(discord_id))
                             if member_obj:
                                 discord_name = member_obj.display_name
                             else:
-                                # Only fetch from API if not in guild cache
                                 user = await self.bot.fetch_user(int(discord_id))
                                 discord_name = user.display_name
                         except:
@@ -200,9 +194,9 @@ class UnionInfo(commands.Cog):
 
                         # Check if this user is the leader
                         if leader_id and str(discord_id) == str(leader_id):
-                            leader_entry = f"　👑 {full_display}"
+                            leader_entry = f"👑 {full_display}"
                         else:
-                            member_entries.append(f"　👤 {full_display}")
+                            member_entries.append(f"👤 {full_display}")
                     
                     # Handle leader not in members table
                     if leader_id and not leader_in_members:
@@ -212,27 +206,42 @@ class UnionInfo(commands.Cog):
                         except:
                             discord_name = f"Unknown User (ID: {leader_id})"
                         
-                        leader_entry = f"　👑 **{discord_name}** ~ IGN: *Not in union*"
+                        leader_entry = f"👑 **{discord_name}** ~ IGN: *Not in union*"
 
-                    # Combine leader (always first) + members
+                    # Combine leader (always first) + ALL members
                     all_entries = []
                     if leader_entry:
                         all_entries.append(leader_entry)
-                    all_entries.extend(member_entries[:25])  # Limit to prevent embed size issues
-                    
-                    if len(member_entries) > 25:
-                        all_entries.append(f"　... and {len(member_entries) - 25} more members")
+                    all_entries.extend(member_entries)  # NO TRUNCATION
                     
                     member_list = "\n".join(all_entries)
 
-                # Add field with member capacity - make union name bigger with bigger header
-                embed.add_field(
-                    name=f"# **{role_name}** ({member_count}/30 members)", 
-                    value=f"{member_list}",
-                    inline=False
-                )
-
-            await interaction.followup.send(embed=embed)
+                union_text += member_list + "\n"
+                
+                # Check if adding this union would exceed Discord's message limit (2000 chars)
+                if len(current_message + union_text) > 1900:  # Leave some buffer
+                    if current_message:
+                        messages.append(current_message)
+                    current_message = union_text
+                else:
+                    current_message += union_text
+            
+            # Add any remaining content
+            if current_message:
+                messages.append(current_message)
+            
+            # Send all messages
+            if not messages:
+                await interaction.followup.send("❌ No union data found.")
+                return
+            
+            # Send first message with title
+            first_message = f"🏛️ **UNION OVERVIEW**\n*Complete list of all registered unions with their leaders and members*\n{messages[0]}"
+            await interaction.followup.send(first_message)
+            
+            # Send additional messages if needed
+            for i, message in enumerate(messages[1:], 2):
+                await interaction.followup.send(f"🏛️ **UNION OVERVIEW (Part {i})**\n{message}")
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
