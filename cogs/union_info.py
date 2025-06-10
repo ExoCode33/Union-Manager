@@ -44,12 +44,13 @@ class UnionInfo(commands.Cog):
                 if not all_users:
                     return  # No users to check
                 
-                # Track statistics
+                # Track statistics and affected leaders
                 total_users = len(all_users)
                 users_still_in_guild = 0
                 users_left_guild = 0
                 leaders_affected = 0
                 cleanup_actions = []
+                affected_leaders = set()  # Track unique affected leaders
                 
                 # Check each user
                 for user_record in all_users:
@@ -89,6 +90,30 @@ class UnionInfo(commands.Cog):
                                 role_names.append(role.name if role else f"Role ID: {leader_check['role_id_2']}")
                             
                             cleanup_actions.append(f"👑 **Leader removed:** {username} from {' & '.join(role_names)}")
+                        
+                        # Check which unions this user was a member of and find their leaders
+                        member_unions = []
+                        if union_name:
+                            member_unions.append(union_name)
+                        if union_name_2:
+                            member_unions.append(union_name_2)
+                        
+                        # Find leaders of unions this member was part of
+                        for union_id in member_unions:
+                            try:
+                                union_leaders = await conn.fetch(
+                                    "SELECT user_id FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", 
+                                    int(union_id)
+                                )
+                                for leader_record in union_leaders:
+                                    leader_id = leader_record['user_id']
+                                    # Only add if the leader is still in the guild and not the user who left
+                                    if leader_id != int(discord_id):
+                                        leader_member = guild.get_member(leader_id)
+                                        if leader_member:
+                                            affected_leaders.add(leader_id)
+                            except:
+                                pass  # Skip invalid union IDs
                         
                         # Log cleanup to history table before removing user
                         await conn.execute("""
@@ -165,18 +190,27 @@ class UnionInfo(commands.Cog):
                     
                     embed.set_footer(text="Automated cleanup runs every 12 hours • Use /show_cleanup_history for full details")
                     
+                    # Create mention string for affected leaders
+                    leader_mentions = []
+                    for leader_id in affected_leaders:
+                        leader_member = guild.get_member(leader_id)
+                        if leader_member:
+                            leader_mentions.append(leader_member.mention)
+                    
+                    # Send message with leader pings if any
+                    if leader_mentions:
+                        ping_message = f"🔔 **Union Leaders:** {' '.join(leader_mentions[:10])}"  # Limit to 10 mentions
+                        if len(leader_mentions) > 10:
+                            ping_message += f" and {len(leader_mentions) - 10} others"
+                        ping_message += "\n*Members from your unions have left Discord - please review the cleanup report below.*"
+                        await target_channel.send(ping_message)
+                    
                     await target_channel.send(embed=embed)
                     print(f"✅ Auto-cleanup completed: {users_left_guild} users removed, posted to #{target_channel.name}")
+                    if affected_leaders:
+                        print(f"📢 Pinged {len(affected_leaders)} union leaders about member departures")
                 
                 else:
-                    # Optional: Send a "no cleanup needed" message (uncomment if desired)
-                    # embed = discord.Embed(
-                    #     title="✅ **AUTOMATED CLEANUP - NO ACTION NEEDED**",
-                    #     description="*All users in database are still active in Discord*",
-                    #     color=0x00FF00
-                    # )
-                    # embed.set_footer(text="Next cleanup in 12 hours")
-                    # await target_channel.send(embed=embed)
                     print("✅ Auto-cleanup completed: No users needed removal")
                     
             except Exception as e:
@@ -217,12 +251,13 @@ class UnionInfo(commands.Cog):
                 await interaction.followup.send("❌ No users found in database.", ephemeral=True)
                 return
 
-            # Track statistics
+            # Track statistics and affected leaders
             total_users = len(all_users)
             users_still_in_guild = 0
             users_left_guild = 0
             leaders_affected = 0
             cleanup_actions = []
+            affected_leaders = set()  # Track unique affected leaders
             
             # Check each user
             for user_record in all_users:
@@ -262,6 +297,30 @@ class UnionInfo(commands.Cog):
                             role_names.append(role.name if role else f"Role ID: {leader_check['role_id_2']}")
                         
                         cleanup_actions.append(f"👑 **Leader removed:** {username} (ID: {discord_id}) from {' & '.join(role_names)}")
+                    
+                    # Check which unions this user was a member of and find their leaders
+                    member_unions = []
+                    if union_name:
+                        member_unions.append(union_name)
+                    if union_name_2:
+                        member_unions.append(union_name_2)
+                    
+                    # Find leaders of unions this member was part of
+                    for union_id in member_unions:
+                        try:
+                            union_leaders = await conn.fetch(
+                                "SELECT user_id FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", 
+                                int(union_id)
+                            )
+                            for leader_record in union_leaders:
+                                leader_id = leader_record['user_id']
+                                # Only add if the leader is still in the guild and not the user who left
+                                if leader_id != int(discord_id):
+                                    leader_member = interaction.guild.get_member(leader_id)
+                                    if leader_member:
+                                        affected_leaders.add(leader_id)
+                        except:
+                            pass  # Skip invalid union IDs
                     
                     # Log cleanup to history table before removing user
                     await conn.execute("""
@@ -341,9 +400,41 @@ class UnionInfo(commands.Cog):
                     inline=False
                 )
             
+            # Add affected leaders info
+            if affected_leaders:
+                embed.add_field(
+                    name="📢 **LEADERS NOTIFIED**",
+                    value=f"**{len(affected_leaders)} union leader(s)** have been notified about members leaving their unions.",
+                    inline=False
+                )
+            
             embed.set_footer(text="Run this command periodically to keep the database clean • Use /show_cleanup_history to view removed users")
             
             await interaction.followup.send(embed=embed, ephemeral=True)
+            
+            # Send notification to union-leader channel if there were changes and affected leaders
+            if users_left_guild > 0:
+                # Find the union-leader channel
+                target_channel = None
+                for channel in interaction.guild.text_channels:
+                    if channel.name.lower() == "union-leader":
+                        target_channel = channel
+                        break
+                
+                if target_channel and affected_leaders:
+                    # Create mention string for affected leaders
+                    leader_mentions = []
+                    for leader_id in affected_leaders:
+                        leader_member = interaction.guild.get_member(leader_id)
+                        if leader_member:
+                            leader_mentions.append(leader_member.mention)
+                    
+                    if leader_mentions:
+                        ping_message = f"🔔 **Union Leaders:** {' '.join(leader_mentions[:10])}"  # Limit to 10 mentions
+                        if len(leader_mentions) > 10:
+                            ping_message += f" and {len(leader_mentions) - 10} others"
+                        ping_message += f"\n*Database cleanup performed by {interaction.user.mention} - members from your unions have left Discord.*"
+                        await target_channel.send(ping_message)
             
         except Exception as e:
             await interaction.followup.send(f"❌ Error during cleanup: {str(e)}", ephemeral=True)
@@ -747,7 +838,7 @@ class UnionInfo(commands.Cog):
                 
                 return
 
-            # Original detailed mode with member lists
+            # Original detailed mode with member lists - NOW WITH ALPHABETICAL SORTING
             # Create embed(s) with 35 line restriction per union
             embeds = []
             
@@ -847,7 +938,7 @@ class UnionInfo(commands.Cog):
                     member_entries = []
                     leader_entry = None
                     
-                    # Process members
+                    # Process members and create sortable list
                     for record in members:
                         discord_id = record['discord_id']
                         ign_primary = record['ign_primary']
@@ -878,9 +969,15 @@ class UnionInfo(commands.Cog):
 
                         # Check if this user is the leader
                         if leader_id and str(discord_id) == str(leader_id):
-                            leader_entry = f"👑 {full_display}"
+                            leader_entry = {
+                                'display': f"👑 {full_display}",
+                                'sort_key': relevant_ign.lower() if relevant_ign != "*Not registered*" and relevant_ign != "*Unknown*" else "zzz"
+                            }
                         else:
-                            member_entries.append(f"👤 {full_display}")
+                            member_entries.append({
+                                'display': f"👤 {full_display}",
+                                'sort_key': relevant_ign.lower() if relevant_ign != "*Not registered*" and relevant_ign != "*Unknown*" else "zzz"
+                            })
                     
                     # Handle leader not in members table
                     if leader_id and not leader_in_members:
@@ -890,30 +987,22 @@ class UnionInfo(commands.Cog):
                         except:
                             discord_name = f"Unknown User (ID: {leader_id})"
                         
-                        leader_entry = f"👑 **{discord_name}** ~ IGN: *Not in union*"
+                        leader_entry = {
+                            'display': f"👑 **{discord_name}** ~ IGN: *Not in union*",
+                            'sort_key': "zzz"  # Put at end since not in union
+                        }
 
-                    # Combine leader + members with character limit per field
+                    # Sort member entries alphabetically by IGN (relevant_ign)
+                    member_entries.sort(key=lambda x: x['sort_key'])
+
+                    # Combine leader + sorted members with character limit per field
                     all_entries = []
                     if leader_entry:
-                        all_entries.append(leader_entry)
+                        all_entries.append(leader_entry['display'])
                     
                     # Apply 35 line restriction (subtract 1 for leader if present)
                     max_members = 34 if leader_entry else 35
-                    all_entries.extend(member_entries[:max_members])
-                    
-                    # Add truncation notice if needed
-                    if len(member_entries) > max_members:
-                        remaining = len(member_entries) - max_members
-                        all_entries.append(f"\n*... and {remaining} more members (35 line limit)*")
-                    
-                    # Combine leader + members with character limit handling
-                    all_entries = []
-                    if leader_entry:
-                        all_entries.append(leader_entry)
-                    
-                    # Apply 35 line restriction (subtract 1 for leader if present)
-                    max_members = 34 if leader_entry else 35
-                    all_entries.extend(member_entries[:max_members])
+                    all_entries.extend([entry['display'] for entry in member_entries[:max_members]])
                     
                     # Add truncation notice if needed
                     if len(member_entries) > max_members:
