@@ -231,7 +231,7 @@ class UnionMembership(commands.Cog):
                     current_role = interaction.guild.get_role(int(current_union))
                     current_role_name = current_role.name if current_role else f"Role ID: {current_union}"
                     await interaction.response.send_message(
-                        f"❌ **{ign}** ({ign_type} IGN) is already in union **{current_role_name}**. Use `/admin_remove_ign_from_union` first to move them.",
+                        f"❌ **{ign}** ({ign_type} IGN) is already in union **{current_role_name}**. Use `/admin_remove_user_from_union` first to move them.",
                         ephemeral=True
                     )
                     return
