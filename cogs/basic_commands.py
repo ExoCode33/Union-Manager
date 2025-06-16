@@ -95,4 +95,187 @@ class BasicCommands(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"❌ Error removing secondary IGN: {str(e)}", ephemeral=True)
         finally:
-            await conn.
+            await conn.close()
+
+    @app_commands.command(name="search_user", description="Search for a user by Discord name, username, ID, or IGN")
+    @app_commands.describe(query="Discord name, username, ID, or IGN to search for")
+    async def search_user(self, interaction: discord.Interaction, query: str):
+        conn = await get_connection()
+        try:
+            # First try to find by Discord ID (if query is numeric)
+            discord_user = None
+            if query.isdigit():
+                try:
+                    discord_user = await self.bot.fetch_user(int(query))
+                except:
+                    pass
+            
+            # If not found by ID, try to find by Discord name/username in the guild
+            if not discord_user:
+                guild = interaction.guild
+                if guild:
+                    # Search by display name or username
+                    for member in guild.members:
+                        if (query.lower() in member.display_name.lower() or 
+                            query.lower() in member.name.lower() or
+                            query.lower() == member.display_name.lower() or
+                            query.lower() == member.name.lower()):
+                            discord_user = member
+                            break
+            
+            # If found by Discord info, get their data
+            if discord_user:
+                row = await conn.fetchrow(
+                    "SELECT ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE discord_id = $1", 
+                    str(discord_user.id)
+                )
+                
+                response = f"**Discord:** {discord_user.mention} ({discord_user.name})\n"
+                if row:
+                    # Show Primary IGN with its union
+                    primary_ign = row['ign_primary'] or 'Not registered'
+                    if row['union_name']:
+                        try:
+                            role_id = int(row['union_name'])
+                            role = interaction.guild.get_role(role_id)
+                            primary_union = role.name if role else f"Role ID: {role_id}"
+                        except:
+                            primary_union = row['union_name']
+                    else:
+                        primary_union = "None"
+                    
+                    response += f"**Primary IGN:** {primary_ign} ~ **Union:** {primary_union}\n"
+                    
+                    # Show Secondary IGN with its union
+                    secondary_ign = row['ign_secondary'] or 'Not registered'
+                    if row['union_name_2']:
+                        try:
+                            role_id = int(row['union_name_2'])
+                            role = interaction.guild.get_role(role_id)
+                            secondary_union = role.name if role else f"Role ID: {role_id}"
+                        except:
+                            secondary_union = row['union_name_2']
+                    else:
+                        secondary_union = "None"
+                    
+                    response += f"**Secondary IGN:** {secondary_ign} ~ **Union:** {secondary_union}"
+                else:
+                    response += "**Primary IGN:** Not registered ~ **Union:** None\n"
+                    response += "**Secondary IGN:** Not registered ~ **Union:** None"
+                
+                await interaction.response.send_message(response)
+                return
+            
+            # If not found by Discord info, search by IGN
+            rows = await conn.fetch(
+                "SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE ign_primary ILIKE $1 OR ign_secondary ILIKE $1", 
+                f"%{query}%"
+            )
+            
+            if not rows:
+                await interaction.response.send_message(f"❌ No user found matching **{query}**")
+                return
+            
+            if len(rows) == 1:
+                # Single result
+                row = rows[0]
+                try:
+                    discord_user = await self.bot.fetch_user(int(row['discord_id']))
+                    user_display = f"{discord_user.mention} ({discord_user.name})"
+                except:
+                    user_display = f"Unknown User (ID: {row['discord_id']})"
+                
+                # Determine which IGN matched
+                matched_ign = ""
+                if row['ign_primary'] and query.lower() in row['ign_primary'].lower():
+                    matched_ign = f"{row['ign_primary']} (Primary)"
+                elif row['ign_secondary'] and query.lower() in row['ign_secondary'].lower():
+                    matched_ign = f"{row['ign_secondary']} (Secondary)"
+                
+                response = f"**Discord:** {user_display}\n**Matched IGN:** {matched_ign}\n"
+                
+                # Handle dual unions for single result with IGN binding
+                unions = []
+                if row['union_name']:
+                    try:
+                        role_id = int(row['union_name'])
+                        role = interaction.guild.get_role(role_id)
+                        union_display = role.name if role else f"Role ID: {role_id}"
+                        primary_ign = row['ign_primary'] or '*Not registered*'
+                        unions.append(f"{union_display} ~ IGN: {primary_ign}")
+                    except:
+                        primary_ign = row['ign_primary'] or '*Not registered*'
+                        unions.append(f"{row['union_name']} ~ IGN: {primary_ign}")
+                
+                if row['union_name_2']:
+                    try:
+                        role_id = int(row['union_name_2'])
+                        role = interaction.guild.get_role(role_id)
+                        union_display = role.name if role else f"Role ID: {role_id}"
+                        secondary_ign = row['ign_secondary'] or '*Not registered*'
+                        unions.append(f"{union_display} ~ IGN: {secondary_ign}")
+                    except:
+                        secondary_ign = row['ign_secondary'] or '*Not registered*'
+                        unions.append(f"{row['union_name_2']} ~ IGN: {secondary_ign}")
+                
+                if unions:
+                    union_text = "\n".join([f"**• {union}**" for union in unions])
+                    response += f"**Unions:**\n{union_text}"
+                else:
+                    response += "**Unions:** Not assigned"
+                
+                await interaction.response.send_message(response)
+            else:
+                # Multiple results
+                response = f"**Multiple users found matching '{query}':**\n\n"
+                for i, row in enumerate(rows[:5]):  # Limit to 5 results
+                    try:
+                        discord_user = await self.bot.fetch_user(int(row['discord_id']))
+                        user_display = f"{discord_user.mention} ({discord_user.name})"
+                    except:
+                        user_display = f"Unknown User (ID: {row['discord_id']})"
+                    
+                    # Show which IGN matched
+                    matched_ign = ""
+                    if row['ign_primary'] and query.lower() in row['ign_primary'].lower():
+                        matched_ign = row['ign_primary']
+                    elif row['ign_secondary'] and query.lower() in row['ign_secondary'].lower():
+                        matched_ign = row['ign_secondary']
+                    
+                    # Handle dual unions for multiple results
+                    unions = []
+                    if row['union_name']:
+                        try:
+                            role_id = int(row['union_name'])
+                            role = interaction.guild.get_role(role_id)
+                            union_display = role.name if role else f"Role ID: {role_id}"
+                            unions.append(union_display)
+                        except:
+                            unions.append(row['union_name'])
+                    
+                    if row['union_name_2']:
+                        try:
+                            role_id = int(row['union_name_2'])
+                            role = interaction.guild.get_role(role_id)
+                            union_display = role.name if role else f"Role ID: {role_id}"
+                            unions.append(union_display)
+                        except:
+                            unions.append(row['union_name_2'])
+                    
+                    union_text = " | ".join(unions) if unions else "None"
+                    
+                    response += f"**{i+1}.** {user_display}\n"
+                    response += f"   IGN: {matched_ign} | Unions: {union_text}\n\n"
+                
+                if len(rows) > 5:
+                    response += f"*... and {len(rows) - 5} more results*"
+                
+                await interaction.response.send_message(response)
+                
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error searching user: {str(e)}", ephemeral=True)
+        finally:
+            await conn.close()
+
+async def setup(bot):
+    await bot.add_cog(BasicCommands(bot))
