@@ -37,11 +37,15 @@ class UnionManagement(commands.Cog):
 
         conn = await get_connection()
         try:
-            result = await conn.execute("INSERT INTO union_roles (role_id) VALUES ($1) ON CONFLICT DO NOTHING", role.id)
-            if result == "INSERT 0 1":
-                await interaction.response.send_message(f"✅ Role **{role.name}** registered as union", ephemeral=True)
-            else:
+            # Check if already exists first
+            existing = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role.id)
+            if existing:
                 await interaction.response.send_message(f"❌ Role **{role.name}** is already registered as union", ephemeral=True)
+                return
+            
+            # Insert new union role
+            await conn.execute("INSERT INTO union_roles (role_id) VALUES ($1)", role.id)
+            await interaction.response.send_message(f"✅ Role **{role.name}** registered as union", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Error registering union role: {str(e)}", ephemeral=True)
         finally:
@@ -170,7 +174,7 @@ class UnionManagement(commands.Cog):
                 else:
                     await conn.execute("INSERT INTO union_leaders (user_id, role_id, role_id_2) VALUES ($1, NULL, $2)", int(discord_id), role.id)
 
-            # 🔧 FIX: Properly add them as a member using the correct IGN slot
+            # Properly add them as a member using the correct IGN slot
             if is_primary_ign:
                 # Primary IGN appointment - update union_name
                 await conn.execute("""
@@ -279,8 +283,8 @@ class UnionManagement(commands.Cog):
                         ephemeral=True
                     )
                     return
-                # Remove secondary leadership
-                await conn.execute("UPDATE union_leaders SET role_id_2 = NULL WHERE user_id = $2", int(discord_id))
+                # Remove secondary leadership - FIXED: was using $2 instead of $1
+                await conn.execute("UPDATE union_leaders SET role_id_2 = NULL WHERE user_id = $1", int(discord_id))
             
             # Clean up record if both leadership slots are now NULL
             updated_leadership = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(discord_id))
