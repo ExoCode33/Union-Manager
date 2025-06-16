@@ -35,7 +35,7 @@ bot_status = BotStatus()
 
 @bot.event
 async def on_ready():
-    """Enhanced bot initialization with comprehensive logging and multi-stage sync"""
+    """Clean bot initialization - Guild-specific commands only (no duplicates)"""
     try:
         # Set startup time
         bot_status.startup_time = datetime.datetime.now(datetime.timezone.utc)
@@ -56,10 +56,12 @@ async def on_ready():
                 perms = bot_member.guild_permissions
                 logger.info(f"    Permissions: Admin={perms.administrator}, SendMessages={perms.send_messages}")
         
-        # Clear existing command state for fresh start
-        logger.info("Clearing existing command state...")
-        bot.tree.clear_commands(guild=None)
-        await asyncio.sleep(1)  # Brief pause
+        # Clear ALL existing commands (global and guild-specific)
+        logger.info("Clearing all existing commands...")
+        bot.tree.clear_commands(guild=None)  # Clear global
+        for guild in bot.guilds:
+            bot.tree.clear_commands(guild=guild)  # Clear guild-specific
+        await asyncio.sleep(1)
         
         # Load all command modules
         logger.info("Loading command modules...")
@@ -77,10 +79,6 @@ async def on_ready():
             try:
                 logger.info(f"Loading {module}...")
                 await bot.load_extension(module)
-                
-                # Count commands from this module
-                module_commands = len([cmd for cmd in bot.tree.get_commands() if getattr(cmd, 'module', '').startswith(module.split('.')[-1])])
-                logger.info(f"  ✅ {module}: {module_commands} commands loaded")
                 loaded_modules += 1
                 
             except Exception as e:
@@ -99,81 +97,58 @@ async def on_ready():
         
         # Verify command tree
         commands_in_tree = len(bot.tree.get_commands())
-        logger.info(f"Commands in tree: {commands_in_tree}")
+        logger.info(f"Commands ready: {commands_in_tree}")
         
         if commands_in_tree > 0:
-            logger.info("Commands ready for synchronization:")
+            logger.info("Commands to sync:")
             for cmd in bot.tree.get_commands():
                 logger.info(f"  - {cmd.name}: {cmd.description}")
         
         logger.info("========================================")
-        logger.info("Starting command synchronization...")
+        logger.info("Starting GUILD-ONLY synchronization (no duplicates)...")
         
-        # Multi-stage synchronization with retries
+        # GUILD-ONLY sync - no global commands
         sync_success = False
-        max_retries = 3
         
-        for attempt in range(1, max_retries + 1):
+        for guild in bot.guilds:
             try:
-                logger.info(f"Global sync attempt {attempt}...")
+                logger.info(f"Syncing commands to guild: {guild.name}")
                 
-                # Global sync
-                global_synced = await bot.tree.sync()
+                # Sync only to this specific guild (not globally)
+                synced = await bot.tree.sync(guild=guild)
                 
-                logger.info(f"✅ Global sync successful: {len(global_synced)} commands")
-                logger.info(f"Synced commands: {', '.join([cmd.name for cmd in global_synced])}")
+                logger.info(f"✅ Guild sync successful: {len(synced)} commands to {guild.name}")
+                logger.info(f"Synced commands: {', '.join([cmd.name for cmd in synced])}")
                 
                 # Verify critical commands
                 critical_commands = ["show_union_leader", "show_union_detail"]
                 for cmd_name in critical_commands:
-                    if any(cmd.name == cmd_name for cmd in global_synced):
-                        logger.info(f"  ✅ Critical command '{cmd_name}' synchronized")
+                    if any(cmd.name == cmd_name for cmd in synced):
+                        logger.info(f"  ✅ Critical command '{cmd_name}' available in {guild.name}")
                     else:
-                        logger.warning(f"  ⚠️ Critical command '{cmd_name}' missing from sync")
-                
-                # Guild-specific sync for each guild
-                for guild in bot.guilds:
-                    try:
-                        logger.info(f"Syncing to guild: {guild.name}")
-                        
-                        # Copy global commands to guild
-                        bot.tree.clear_commands(guild=guild)
-                        for cmd in global_synced:
-                            bot.tree.add_command(cmd, guild=guild)
-                        
-                        guild_synced = await bot.tree.sync(guild=guild)
-                        logger.info(f"✅ Guild sync: {len(guild_synced)} commands to {guild.name}")
-                        
-                    except Exception as guild_error:
-                        logger.error(f"❌ Guild sync failed for {guild.name}: {str(guild_error)}")
+                        logger.warning(f"  ⚠️ Critical command '{cmd_name}' missing in {guild.name}")
                 
                 # Update status
-                bot_status.commands_synced = len(global_synced)
+                bot_status.commands_synced = len(synced)
                 bot_status.last_sync_time = datetime.datetime.now(datetime.timezone.utc)
                 sync_success = True
-                break
                 
             except Exception as e:
-                logger.error(f"❌ Sync attempt {attempt} failed: {str(e)}")
+                logger.error(f"❌ Guild sync failed for {guild.name}: {str(e)}")
                 bot_status.sync_errors += 1
-                
-                if attempt < max_retries:
-                    logger.info(f"Retrying in 3 seconds... ({attempt}/{max_retries})")
-                    await asyncio.sleep(3)
-                else:
-                    logger.error("❌ All sync attempts failed!")
         
         # Final status report
         logger.info("========================================")
         if sync_success:
             logger.info("🎉 BOT INITIALIZATION COMPLETE")
             logger.info(f"✅ {loaded_modules} modules loaded")
-            logger.info(f"✅ {bot_status.commands_synced} commands synchronized")
+            logger.info(f"✅ {bot_status.commands_synced} commands synchronized per guild")
             logger.info(f"✅ Connected to {len(bot.guilds)} guilds")
+            logger.info("✅ NO DUPLICATE COMMANDS - Guild-specific only")
             logger.info("Commands will be available in Discord within 1-2 minutes")
         else:
             logger.warning("⚠️ BOT STARTED WITH SYNC ISSUES")
-            logger.warning("Use !sync_commands to manually sync")
+            logger.warning("Use !clean_sync to manually sync")
         
         logger.info("============================================================")
         
@@ -200,90 +175,50 @@ async def on_command_error(ctx, error):
         await ctx.send(f"❌ An unexpected error occurred: {str(error)}")
 
 # ============================================================
-# ADMINISTRATIVE COMMANDS
+# CLEAN SYNC COMMANDS (NO DUPLICATES)
 # ============================================================
 
-@bot.command(name='sync_commands')
-async def sync_commands(ctx):
-    """Manually sync commands to Discord (Admin only)"""
+@bot.command(name='clean_sync')
+async def clean_sync(ctx):
+    """Clean sync - Guild-specific commands only, no duplicates (Admin only)"""
     if not any(role.name.lower() in ["admin", "administrator"] for role in ctx.author.roles):
         await ctx.send("❌ This command requires administrator permissions.")
         return
     
     try:
-        await ctx.send("🔄 **SYNCING COMMANDS...**")
+        await ctx.send("🧹 **CLEAN SYNC STARTING...**\n*Removing duplicates and syncing guild-specific only*")
         
-        # Global sync
-        synced = await bot.tree.sync()
-        
-        success_msg = f"""✅ **SYNC COMPLETE!**
-
-**Commands synced:** {len(synced)}
-**Status:** Commands will be available in 1-2 minutes
-
-**Synced commands:**
-{', '.join([f'`/{cmd.name}`' for cmd in synced[:10]])}
-{'...' if len(synced) > 10 else ''}"""
-        
-        await ctx.send(success_msg)
-        
-        # Update status
-        bot_status.commands_synced = len(synced)
-        bot_status.last_sync_time = datetime.datetime.now(datetime.timezone.utc)
-        
-        logger.info(f"Manual sync successful: {len(synced)} commands")
-        
-    except Exception as e:
-        await ctx.send(f"❌ **Sync failed:** {str(e)}")
-        logger.error(f"Manual sync error: {str(e)}")
-
-@bot.command(name='force_guild_sync')
-async def force_guild_sync(ctx):
-    """Force sync all commands specifically to this guild (Admin only)"""
-    # Check admin permissions
-    if not any(role.name.lower() in ["admin", "administrator"] for role in ctx.author.roles):
-        await ctx.send("❌ This command requires administrator permissions.")
-        return
-    
-    try:
-        await ctx.send("🔄 **FORCE GUILD SYNC STARTING...**")
-        
-        # Get current guild
         guild = ctx.guild
-        guild_id = guild.id
         
-        logger.info(f"Force guild sync requested for: {guild.name} (ID: {guild_id})")
+        # Step 1: Clear global commands completely
+        logger.info("Clearing global commands...")
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync()  # Empty global sync
         
-        # Clear guild-specific commands first
+        # Step 2: Clear guild commands
+        logger.info(f"Clearing guild commands for {guild.name}...")
         bot.tree.clear_commands(guild=guild)
-        logger.info("Cleared existing guild commands")
         
-        # Copy all global commands to guild-specific
-        global_commands = bot.tree.get_commands()
-        for cmd in global_commands:
-            bot.tree.add_command(cmd, guild=guild)
-        
-        logger.info(f"Added {len(global_commands)} commands to guild tree")
-        
-        # Sync specifically to this guild
+        # Step 3: Sync only to this guild
+        logger.info(f"Syncing to guild only: {guild.name}")
         synced = await bot.tree.sync(guild=guild)
         
-        success_msg = f"""🎉 **GUILD SYNC COMPLETE!**
-        
-✅ **Guild:** {guild.name}
-✅ **Commands Synced:** {len(synced)}
-✅ **Status:** Ready to use
+        success_msg = f"""✅ **CLEAN SYNC COMPLETE!**
 
-**Commands now available:**
+🧹 **No Duplicates:** Guild-specific commands only
+✅ **Guild:** {guild.name}
+✅ **Commands Available:** {len(synced)}
+
+**Commands synced:**
 {', '.join([f'`/{cmd.name}`' for cmd in synced[:10]])}
 {'...' if len(synced) > 10 else ''}
 
 ⏰ **Commands will appear in 1-2 minutes**
-Try typing `/` to see them!"""
+🎯 **No duplicate commands!**"""
         
         await ctx.send(success_msg)
         
-        logger.info(f"✅ Force guild sync successful: {len(synced)} commands to {guild.name}")
+        logger.info(f"✅ Clean sync successful: {len(synced)} commands to {guild.name}")
         logger.info(f"Synced commands: {[cmd.name for cmd in synced]}")
         
         # Update status
@@ -291,14 +226,36 @@ Try typing `/` to see them!"""
         bot_status.last_sync_time = datetime.datetime.now(datetime.timezone.utc)
         
     except Exception as e:
-        error_msg = f"❌ **Guild sync failed:** {str(e)}"
+        error_msg = f"❌ **Clean sync failed:** {str(e)}"
         await ctx.send(error_msg)
-        logger.error(f"Force guild sync error: {str(e)}")
+        logger.error(f"Clean sync error: {str(e)}")
         logger.error(traceback.format_exc())
 
-@bot.command(name='debug_commands')
-async def debug_commands(ctx):
-    """Debug command visibility (Admin only)"""
+@bot.command(name='remove_duplicates')
+async def remove_duplicates(ctx):
+    """Remove duplicate commands by clearing global and keeping guild-specific (Admin only)"""
+    if not any(role.name.lower() in ["admin", "administrator"] for role in ctx.author.roles):
+        await ctx.send("❌ This command requires administrator permissions.")
+        return
+    
+    try:
+        await ctx.send("🧹 **REMOVING DUPLICATES...**")
+        
+        # Clear global commands only (keep guild commands)
+        bot.tree.clear_commands(guild=None)
+        global_cleared = await bot.tree.sync()  # Empty global sync
+        
+        await ctx.send(f"✅ **Duplicates removed!** Global commands cleared.\n🎯 Only guild-specific commands remain (no duplicates)")
+        
+        logger.info("Duplicate removal: Global commands cleared, guild commands retained")
+        
+    except Exception as e:
+        await ctx.send(f"❌ **Duplicate removal failed:** {str(e)}")
+        logger.error(f"Duplicate removal error: {str(e)}")
+
+@bot.command(name='check_duplicates')
+async def check_duplicates(ctx):
+    """Check for duplicate commands (Admin only)"""
     if not any(role.name.lower() in ["admin", "administrator"] for role in ctx.author.roles):
         await ctx.send("❌ This command requires administrator permissions.")
         return
@@ -306,59 +263,38 @@ async def debug_commands(ctx):
     try:
         guild = ctx.guild
         
-        # Get global commands
+        # Get global and guild commands
         global_commands = bot.tree.get_commands()
-        
-        # Get guild-specific commands
         guild_commands = bot.tree.get_commands(guild=guild)
         
-        # Check if specific commands exist
-        show_leader_global = any(cmd.name == "show_union_leader" for cmd in global_commands)
-        show_leader_guild = any(cmd.name == "show_union_leader" for cmd in guild_commands)
+        # Find duplicates
+        global_names = {cmd.name for cmd in global_commands}
+        guild_names = {cmd.name for cmd in guild_commands}
+        duplicates = global_names.intersection(guild_names)
         
-        debug_info = f"""🔍 **COMMAND DEBUG INFO**
+        if duplicates:
+            duplicate_list = ', '.join([f'`{name}`' for name in duplicates])
+            duplicate_msg = f"""⚠️ **DUPLICATES FOUND:**
 
 **Global Commands:** {len(global_commands)}
 **Guild Commands:** {len(guild_commands)}
+**Duplicated:** {len(duplicates)}
 
-**show_union_leader status:**
-- Global: {'✅ Found' if show_leader_global else '❌ Missing'}
-- Guild: {'✅ Found' if show_leader_guild else '❌ Missing'}
+**Duplicate commands:**
+{duplicate_list}
 
-**All Global Commands:**
-{', '.join([f'`{cmd.name}`' for cmd in global_commands])}
+**Fix:** Run `!remove_duplicates` or `!clean_sync`"""
+        else:
+            duplicate_msg = f"""✅ **NO DUPLICATES FOUND:**
 
-**Guild Commands:**
-{', '.join([f'`{cmd.name}`' for cmd in guild_commands]) if guild_commands else 'None'}
-
-**Recommendation:**
-{'✅ Commands should be visible' if show_leader_guild else '⚠️ Run !force_guild_sync'}"""
-
-        await ctx.send(debug_info)
+**Global Commands:** {len(global_commands)}
+**Guild Commands:** {len(guild_commands)}
+**Status:** Clean - no duplicate commands"""
+        
+        await ctx.send(duplicate_msg)
         
     except Exception as e:
-        await ctx.send(f"❌ Debug failed: {str(e)}")
-
-@bot.command(name='reload_module')
-async def reload_module(ctx, module_name: str):
-    """Reload a specific module (Admin only)"""
-    if not any(role.name.lower() in ["admin", "administrator"] for role in ctx.author.roles):
-        await ctx.send("❌ This command requires administrator permissions.")
-        return
-    
-    try:
-        await ctx.send(f"🔄 **RELOADING MODULE:** `{module_name}`")
-        
-        # Reload the module
-        full_module_name = f"cogs.{module_name}"
-        await bot.reload_extension(full_module_name)
-        
-        await ctx.send(f"✅ **MODULE RELOADED:** `{module_name}`")
-        logger.info(f"Module reloaded: {full_module_name}")
-        
-    except Exception as e:
-        await ctx.send(f"❌ **Reload failed:** {str(e)}")
-        logger.error(f"Module reload error: {str(e)}")
+        await ctx.send(f"❌ Duplicate check failed: {str(e)}")
 
 @bot.command(name='bot_status')
 async def bot_status_command(ctx):
@@ -377,7 +313,9 @@ async def bot_status_command(ctx):
             uptime = f"{hours}h {minutes}m {seconds}s"
         
         # Get command counts
-        total_commands = len(bot.tree.get_commands())
+        guild = ctx.guild
+        global_commands = len(bot.tree.get_commands())
+        guild_commands = len(bot.tree.get_commands(guild=guild))
         
         # Format last sync time
         last_sync = "Never"
@@ -400,9 +338,15 @@ async def bot_status_command(ctx):
         
         status_embed.add_field(
             name="⚙️ Commands",
-            value=f"""**Total Commands:** {total_commands}
-**Last Sync:** {bot_status.commands_synced}
+            value=f"""**Global Commands:** {global_commands}
+**Guild Commands:** {guild_commands}
 **Sync Errors:** {bot_status.sync_errors}""",
+            inline=True
+        )
+        
+        status_embed.add_field(
+            name="🧹 Duplicate Status",
+            value="✅ Clean" if global_commands == 0 else "⚠️ May have duplicates",
             inline=True
         )
         
@@ -416,46 +360,6 @@ async def bot_status_command(ctx):
         
     except Exception as e:
         await ctx.send(f"❌ Status display failed: {str(e)}")
-
-@bot.command(name='list_commands')
-async def list_commands(ctx):
-    """List all available commands organized by category"""
-    try:
-        commands_by_cog = {}
-        
-        # Organize commands by cog
-        for cmd in bot.tree.get_commands():
-            cog_name = getattr(cmd, 'binding', None)
-            if cog_name:
-                cog_name = cog_name.__class__.__name__
-            else:
-                cog_name = "General"
-            
-            if cog_name not in commands_by_cog:
-                commands_by_cog[cog_name] = []
-            commands_by_cog[cog_name].append(cmd)
-        
-        embed = discord.Embed(
-            title="📋 Available Commands",
-            description=f"Total Commands: {len(bot.tree.get_commands())}",
-            color=discord.Color.blue()
-        )
-        
-        for cog_name, commands in commands_by_cog.items():
-            command_list = []
-            for cmd in commands:
-                command_list.append(f"`/{cmd.name}` - {cmd.description}")
-            
-            embed.add_field(
-                name=f"📁 {cog_name} ({len(commands)})",
-                value="\n".join(command_list),
-                inline=False
-            )
-        
-        await ctx.send(embed=embed)
-        
-    except Exception as e:
-        await ctx.send(f"❌ Failed to list commands: {str(e)}")
 
 # ============================================================
 # BASIC SLASH COMMANDS
@@ -474,16 +378,22 @@ async def ping(interaction: discord.Interaction):
 async def bot_info(interaction: discord.Interaction):
     """Display bot information"""
     try:
+        guild = interaction.guild
+        global_commands = len(bot.tree.get_commands())
+        guild_commands = len(bot.tree.get_commands(guild=guild))
+        
         embed = discord.Embed(
             title="🤖 Union Bot Information",
-            description="Discord Union Management Bot",
+            description="Discord Union Management Bot - Clean Version",
             color=discord.Color.blue()
         )
         
         embed.add_field(name="👤 Bot", value=f"{bot.user.name}#{bot.user.discriminator}", inline=True)
         embed.add_field(name="🆔 ID", value=str(bot.user.id), inline=True)
         embed.add_field(name="🏠 Guilds", value=str(len(bot.guilds)), inline=True)
-        embed.add_field(name="⚙️ Commands", value=str(len(bot.tree.get_commands())), inline=True)
+        embed.add_field(name="⚙️ Global Commands", value=str(global_commands), inline=True)
+        embed.add_field(name="🎯 Guild Commands", value=str(guild_commands), inline=True)
+        embed.add_field(name="🧹 Status", value="✅ No Duplicates" if global_commands == 0 else "⚠️ Check duplicates", inline=True)
         
         await interaction.response.send_message(embed=embed)
         
@@ -500,10 +410,19 @@ async def ping_prefix(ctx):
     latency = round(bot.latency * 1000)
     await ctx.send(f"🏓 **Pong!** Latency: {latency}ms")
 
-@bot.command(name='test_slash')
-async def test_slash(ctx):
-    """Test if slash commands are working"""
-    await ctx.send("✅ **Prefix commands work!** Now try `/ping` to test slash commands.")
+@bot.command(name='help_clean')
+async def help_clean(ctx):
+    """Show clean sync commands"""
+    help_msg = """🧹 **CLEAN SYNC COMMANDS:**
+
+**!clean_sync** - Remove duplicates and sync guild-specific only
+**!remove_duplicates** - Remove global commands (keep guild commands)
+**!check_duplicates** - Check for duplicate commands
+**!bot_status** - View bot status and duplicate status
+
+🎯 **Goal:** One copy of each command per guild (no duplicates)"""
+    
+    await ctx.send(help_msg)
 
 # ============================================================
 # BOT STARTUP
@@ -517,7 +436,7 @@ async def main():
             logger.error("Please set your bot token in the .env file")
             return
         
-        logger.info("Starting Discord Union Bot...")
+        logger.info("Starting Discord Union Bot (Clean Version - No Duplicates)...")
         await bot.start(TOKEN)
         
     except discord.LoginFailure:
