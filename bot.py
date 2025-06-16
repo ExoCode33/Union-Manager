@@ -38,7 +38,7 @@ bot_status = BotStatus()
 @bot.event
 async def on_ready():
     import datetime
-    bot_status.startup_time = datetime.datetime.utcnow()
+    bot_status.startup_time = datetime.datetime.now(datetime.timezone.utc)
     
     logger.info("=" * 60)
     logger.info("DISCORD UNION BOT INITIALIZATION")
@@ -54,7 +54,7 @@ async def on_ready():
         bot_member = guild.get_member(bot.user.id)
         if bot_member:
             perms = bot_member.guild_permissions
-            logger.info(f"    Permissions: Admin={perms.administrator}, SlashCommands={perms.use_slash_commands}")
+            logger.info(f"    Permissions: Admin={perms.administrator}, SendMessages={perms.send_messages}")
     
     # Clear existing command state for clean initialization
     logger.info("Clearing existing command state...")
@@ -144,7 +144,7 @@ async def on_ready():
             
             logger.info(f"✅ Global sync successful: {len(synced_commands)} commands")
             bot_status.commands_synced = len(synced_commands)
-            bot_status.last_sync_time = datetime.datetime.utcnow()
+            bot_status.last_sync_time = datetime.datetime.now(datetime.timezone.utc)
             
             # Log synchronized command names
             if synced_commands:
@@ -269,7 +269,7 @@ async def sync_commands(ctx):
             # Update status
             import datetime
             bot_status.commands_synced = len(global_synced)
-            bot_status.last_sync_time = datetime.datetime.utcnow()
+            bot_status.last_sync_time = datetime.datetime.now(datetime.timezone.utc)
             
             embed = discord.Embed(
                 title="✅ Command Synchronization Complete",
@@ -413,7 +413,7 @@ async def bot_status(ctx):
     # Calculate uptime
     uptime = "Unknown"
     if bot_status.startup_time:
-        uptime_delta = datetime.datetime.utcnow() - bot_status.startup_time
+        uptime_delta = datetime.datetime.now(datetime.timezone.utc) - bot_status.startup_time
         hours, remainder = divmod(int(uptime_delta.total_seconds()), 3600)
         minutes, _ = divmod(remainder, 60)
         uptime = f"{hours}h {minutes}m"
@@ -421,7 +421,7 @@ async def bot_status(ctx):
     # Last sync time
     last_sync = "Never"
     if bot_status.last_sync_time:
-        sync_delta = datetime.datetime.utcnow() - bot_status.last_sync_time
+        sync_delta = datetime.datetime.now(datetime.timezone.utc) - bot_status.last_sync_time
         if sync_delta.total_seconds() < 60:
             last_sync = "Just now"
         elif sync_delta.total_seconds() < 3600:
