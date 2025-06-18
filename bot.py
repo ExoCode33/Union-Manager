@@ -33,6 +33,60 @@ class BotStatus:
 
 bot_status = BotStatus()
 
+async def debug_commands():
+    """Debug function to check if commands are properly registered"""
+    try:
+        print("\n" + "="*60)
+        print("🔍 COMMAND REGISTRATION DEBUG")
+        print("="*60)
+        
+        # Check commands in tree
+        tree_commands = bot.tree.get_commands()
+        print(f"📊 Commands in bot.tree: {len(tree_commands)}")
+        
+        if tree_commands:
+            print("\n🌳 Commands in tree:")
+            for i, cmd in enumerate(tree_commands, 1):
+                print(f"  {i:2d}. {cmd.name}")
+                print(f"      Description: {cmd.description}")
+                print(f"      Parameters: {[param.name for param in cmd.parameters]}")
+                print()
+        else:
+            print("❌ NO COMMANDS FOUND IN TREE!")
+        
+        # Check cogs and their commands
+        print(f"\n🧩 Loaded cogs: {len(bot.cogs)}")
+        total_cog_commands = 0
+        
+        for cog_name, cog in bot.cogs.items():
+            app_commands = cog.get_app_commands()
+            total_cog_commands += len(app_commands)
+            print(f"\n📦 {cog_name}: {len(app_commands)} commands")
+            
+            if app_commands:
+                for j, cmd in enumerate(app_commands, 1):
+                    print(f"    {j}. {cmd.name} - {cmd.description}")
+            else:
+                print("    ❌ No app commands found in this cog")
+        
+        print(f"\n📈 SUMMARY:")
+        print(f"  Total cogs: {len(bot.cogs)}")
+        print(f"  Commands from cogs: {total_cog_commands}")
+        print(f"  Commands in tree: {len(tree_commands)}")
+        print(f"  Discrepancy: {total_cog_commands - len(tree_commands)}")
+        
+        if total_cog_commands != len(tree_commands):
+            print("⚠️ MISMATCH DETECTED: Commands in cogs don't match commands in tree!")
+        else:
+            print("✅ Command counts match between cogs and tree")
+        
+        print("="*60)
+        print()
+        
+    except Exception as e:
+        print(f"❌ Debug error: {e}")
+        print(traceback.format_exc())
+
 @bot.event
 async def on_ready():
     """Clean bot initialization - Guild-specific commands only (no duplicates)"""
@@ -95,6 +149,9 @@ async def on_ready():
         logger.info(f"  Failed: {len(modules) - loaded_modules}")
         logger.info(f"  Total Commands: {total_commands}")
         
+        # DEBUG: Check command registration
+        await debug_commands()
+        
         # Verify command tree
         commands_in_tree = len(bot.tree.get_commands())
         logger.info(f"Commands ready: {commands_in_tree}")
@@ -103,6 +160,8 @@ async def on_ready():
             logger.info("Commands to sync:")
             for cmd in bot.tree.get_commands():
                 logger.info(f"  - {cmd.name}: {cmd.description}")
+        else:
+            logger.error("❌ NO COMMANDS IN TREE - SYNC WILL FAIL")
         
         logger.info("========================================")
         logger.info("Starting GUILD-ONLY synchronization (no duplicates)...")
@@ -114,19 +173,31 @@ async def on_ready():
             try:
                 logger.info(f"Syncing commands to guild: {guild.name}")
                 
+                # DEBUG: Check what we're about to sync
+                pre_sync_commands = bot.tree.get_commands(guild=guild)
+                logger.info(f"Pre-sync: {len(pre_sync_commands)} commands for {guild.name}")
+                
                 # Sync only to this specific guild (not globally)
                 synced = await bot.tree.sync(guild=guild)
                 
                 logger.info(f"✅ Guild sync successful: {len(synced)} commands to {guild.name}")
-                logger.info(f"Synced commands: {', '.join([cmd.name for cmd in synced])}")
                 
-                # Verify critical commands
-                critical_commands = ["show_union_leader", "show_union_detail"]
-                for cmd_name in critical_commands:
-                    if any(cmd.name == cmd_name for cmd in synced):
-                        logger.info(f"  ✅ Critical command '{cmd_name}' available in {guild.name}")
-                    else:
-                        logger.warning(f"  ⚠️ Critical command '{cmd_name}' missing in {guild.name}")
+                if synced:
+                    logger.info(f"Synced commands: {', '.join([cmd.name for cmd in synced])}")
+                    
+                    # Verify critical commands
+                    critical_commands = ["show_union_leader", "show_union_detail"]
+                    for cmd_name in critical_commands:
+                        if any(cmd.name == cmd_name for cmd in synced):
+                            logger.info(f"  ✅ Critical command '{cmd_name}' available in {guild.name}")
+                        else:
+                            logger.warning(f"  ⚠️ Critical command '{cmd_name}' missing in {guild.name}")
+                else:
+                    logger.error(f"❌ No commands were synced to {guild.name}")
+                    logger.error("This usually means:")
+                    logger.error("  1. Commands are not properly registered in the tree")
+                    logger.error("  2. Bot lacks necessary permissions")
+                    logger.error("  3. Discord API rate limiting")
                 
                 # Update status
                 bot_status.commands_synced = len(synced)
@@ -135,6 +206,7 @@ async def on_ready():
                 
             except Exception as e:
                 logger.error(f"❌ Guild sync failed for {guild.name}: {str(e)}")
+                logger.error(traceback.format_exc())
                 bot_status.sync_errors += 1
         
         # Final status report
@@ -145,7 +217,11 @@ async def on_ready():
             logger.info(f"✅ {bot_status.commands_synced} commands synchronized per guild")
             logger.info(f"✅ Connected to {len(bot.guilds)} guilds")
             logger.info("✅ NO DUPLICATE COMMANDS - Guild-specific only")
-            logger.info("Commands will be available in Discord within 1-2 minutes")
+            
+            if bot_status.commands_synced > 0:
+                logger.info("Commands will be available in Discord within 1-2 minutes")
+            else:
+                logger.warning("⚠️ NO COMMANDS SYNCED - Check debug output above")
         else:
             logger.warning("⚠️ BOT STARTED WITH SYNC ISSUES")
             logger.warning("Use !clean_sync to manually sync")
@@ -177,6 +253,53 @@ async def on_command_error(ctx, error):
 # ============================================================
 # CLEAN SYNC COMMANDS (NO DUPLICATES)
 # ============================================================
+
+@bot.command(name='debug_sync')
+async def debug_sync(ctx):
+    """Debug sync command to check what's happening"""
+    if not any(role.name.lower() in ["admin", "administrator"] for role in ctx.author.roles):
+        await ctx.send("❌ This command requires administrator permissions.")
+        return
+    
+    try:
+        await ctx.send("🔍 **STARTING DEBUG SYNC...**")
+        
+        # Run debug function
+        await debug_commands()
+        
+        guild = ctx.guild
+        
+        # Check current state
+        tree_commands = len(bot.tree.get_commands())
+        guild_commands = len(bot.tree.get_commands(guild=guild))
+        
+        debug_msg = f"""📊 **DEBUG INFORMATION:**
+
+**Tree Commands:** {tree_commands}
+**Guild Commands:** {guild_commands}
+**Loaded Cogs:** {len(bot.cogs)}
+
+**Cogs:** {', '.join(bot.cogs.keys())}
+
+**Tree Commands List:**
+{chr(10).join([f'• {cmd.name}' for cmd in bot.tree.get_commands()]) if bot.tree.get_commands() else 'None'}"""
+
+        await ctx.send(debug_msg)
+        
+        # Try to sync
+        await ctx.send("🔄 Attempting sync...")
+        synced = await bot.tree.sync(guild=guild)
+        
+        await ctx.send(f"✅ **Sync result:** {len(synced)} commands synced")
+        
+        if synced:
+            sync_list = '\n'.join([f'• {cmd.name}' for cmd in synced])
+            await ctx.send(f"**Synced commands:**\n{sync_list}")
+        
+    except Exception as e:
+        await ctx.send(f"❌ Debug sync failed: {str(e)}")
+        logger.error(f"Debug sync error: {str(e)}")
+        logger.error(traceback.format_exc())
 
 @bot.command(name='clean_sync')
 async def clean_sync(ctx):
@@ -415,6 +538,7 @@ async def help_clean(ctx):
     """Show clean sync commands"""
     help_msg = """🧹 **CLEAN SYNC COMMANDS:**
 
+**!debug_sync** - Debug command registration and sync issues
 **!clean_sync** - Remove duplicates and sync guild-specific only
 **!remove_duplicates** - Remove global commands (keep guild commands)
 **!check_duplicates** - Check for duplicate commands
