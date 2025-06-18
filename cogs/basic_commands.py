@@ -10,7 +10,6 @@ class BasicCommands(commands.Cog):
     @app_commands.command(name="register_primary_ign", description="Register a user's primary in-game name")
     @app_commands.describe(user="Discord user", ign="Primary in-game name", visible="Make this message visible to everyone (default: False)")
     async def register_primary_ign(self, interaction: discord.Interaction, user: discord.Member, ign: str, visible: bool = False):
-        ephemeral = not visible
         conn = await get_connection()
         try:
             # First, check if user exists and get their current data
@@ -27,17 +26,16 @@ class BasicCommands(commands.Cog):
                 """, str(user.id), user.display_name, ign)
 
             await interaction.response.send_message(
-                f"✅ Primary IGN for {user.mention} ({user.name}) set to **{ign}**", ephemeral=ephemeral
+                f"✅ Primary IGN for {user.mention} ({user.name}) set to **{ign}**", ephemeral=not visible
             )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error registering primary IGN: {str(e)}", ephemeral=ephemeral)
+            await interaction.response.send_message(f"❌ Error registering primary IGN: {str(e)}", ephemeral=not visible)
         finally:
             await conn.close()
 
     @app_commands.command(name="register_secondary_ign", description="Register a user's secondary in-game name")
     @app_commands.describe(user="Discord user", ign="Secondary in-game name", visible="Make this message visible to everyone (default: False)")
     async def register_secondary_ign(self, interaction: discord.Interaction, user: discord.Member, ign: str, visible: bool = False):
-        ephemeral = not visible
         conn = await get_connection()
         try:
             # First, check if user exists and get their current data
@@ -54,57 +52,54 @@ class BasicCommands(commands.Cog):
                 """, str(user.id), user.display_name, ign)
 
             await interaction.response.send_message(
-                f"✅ Secondary IGN for {user.mention} ({user.name}) set to **{ign}**", ephemeral=ephemeral
+                f"✅ Secondary IGN for {user.mention} ({user.name}) set to **{ign}**", ephemeral=not visible
             )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error registering secondary IGN: {str(e)}", ephemeral=ephemeral)
+            await interaction.response.send_message(f"❌ Error registering secondary IGN: {str(e)}", ephemeral=not visible)
         finally:
             await conn.close()
 
     @app_commands.command(name="deregister_primary_ign", description="Remove a user's primary IGN registration")
     @app_commands.describe(user="Discord user", visible="Make this message visible to everyone (default: False)")
     async def deregister_primary_ign(self, interaction: discord.Interaction, user: discord.Member, visible: bool = False):
-        ephemeral = not visible
         conn = await get_connection()
         try:
             result = await conn.execute("UPDATE users SET ign_primary = NULL WHERE discord_id = $1", str(user.id))
             if result and "UPDATE 1" in result:
                 await interaction.response.send_message(
-                    f"✅ Primary IGN for {user.mention} ({user.name}) has been removed", ephemeral=ephemeral
+                    f"✅ Primary IGN for {user.mention} ({user.name}) has been removed", ephemeral=not visible
                 )
             else:
                 await interaction.response.send_message(
-                    f"❌ No primary IGN found for {user.mention}", ephemeral=ephemeral
+                    f"❌ No primary IGN found for {user.mention}", ephemeral=not visible
                 )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error removing primary IGN: {str(e)}", ephemeral=ephemeral)
+            await interaction.response.send_message(f"❌ Error removing primary IGN: {str(e)}", ephemeral=not visible)
         finally:
             await conn.close()
 
     @app_commands.command(name="deregister_secondary_ign", description="Remove a user's secondary IGN registration")
     @app_commands.describe(user="Discord user", visible="Make this message visible to everyone (default: False)")
     async def deregister_secondary_ign(self, interaction: discord.Interaction, user: discord.Member, visible: bool = False):
-        ephemeral = not visible
         conn = await get_connection()
         try:
             result = await conn.execute("UPDATE users SET ign_secondary = NULL WHERE discord_id = $1", str(user.id))
             if result and "UPDATE 1" in result:
                 await interaction.response.send_message(
-                    f"✅ Secondary IGN for {user.mention} ({user.name}) has been removed", ephemeral=ephemeral
+                    f"✅ Secondary IGN for {user.mention} ({user.name}) has been removed", ephemeral=not visible
                 )
             else:
                 await interaction.response.send_message(
-                    f"❌ No secondary IGN found for {user.mention}", ephemeral=ephemeral
+                    f"❌ No secondary IGN found for {user.mention}", ephemeral=not visible
                 )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error removing secondary IGN: {str(e)}", ephemeral=ephemeral)
+            await interaction.response.send_message(f"❌ Error removing secondary IGN: {str(e)}", ephemeral=not visible)
         finally:
             await conn.close()
 
     @app_commands.command(name="search_user", description="Search for a user by Discord name, username, ID, or IGN")
     @app_commands.describe(query="Discord name, username, ID, or IGN to search for", visible="Make this message visible to everyone (default: True)")
     async def search_user(self, interaction: discord.Interaction, query: str, visible: bool = True):
-        ephemeral = not visible
         conn = await get_connection()
         try:
             # First try to find by Discord ID (if query is numeric)
@@ -168,7 +163,7 @@ class BasicCommands(commands.Cog):
                     response += "**Primary IGN:** Not registered ~ **Union:** None\n"
                     response += "**Secondary IGN:** Not registered ~ **Union:** None"
                 
-                await interaction.response.send_message(response, ephemeral=ephemeral)
+                await interaction.response.send_message(response, ephemeral=not visible)
                 return
             
             # If not found by Discord info, search by IGN
@@ -178,7 +173,7 @@ class BasicCommands(commands.Cog):
             )
             
             if not rows:
-                await interaction.response.send_message(f"❌ No user found matching **{query}**", ephemeral=ephemeral)
+                await interaction.response.send_message(f"❌ No user found matching **{query}**", ephemeral=not visible)
                 return
             
             if len(rows) == 1:
@@ -229,7 +224,7 @@ class BasicCommands(commands.Cog):
                 else:
                     response += "**Unions:** Not assigned"
                 
-                await interaction.response.send_message(response, ephemeral=ephemeral)
+                await interaction.response.send_message(response, ephemeral=not visible)
             else:
                 # Multiple results
                 response = f"**Multiple users found matching '{query}':**\n\n"
@@ -275,10 +270,10 @@ class BasicCommands(commands.Cog):
                 if len(rows) > 5:
                     response += f"*... and {len(rows) - 5} more results*"
                 
-                await interaction.response.send_message(response, ephemeral=ephemeral)
+                await interaction.response.send_message(response, ephemeral=not visible)
                 
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error searching user: {str(e)}", ephemeral=ephemeral)
+            await interaction.response.send_message(f"❌ Error searching user: {str(e)}", ephemeral=not visible)
         finally:
             await conn.close()
 
