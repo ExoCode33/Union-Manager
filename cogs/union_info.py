@@ -1,19 +1,4 @@
-# Send embeds
-            if not embeds:
-                await interaction.followup.send("❌ No union data found.", ephemeral=not visible)
-                return
-            
-            # Send first embed with appropriate message
-            if union_name:
-                await interaction.followup.send(f"🔍 **Union Search Result for '{union_name}'**", embed=embeds[0], ephemeral=not visible)
-            else:
-                members_text = " (members hidden)" if not show_members else ""
-                await interaction.followup.send(f"🏛️ **Union Overview** ({len(embeds)} unions){members_text}", embed=embeds[0], ephemeral=not visible)
-            
-            # Send additional embeds if showing all unions
-            for i, embed in enumerate(embeds[1:], 2):
-                members_text = " (members hidden)" if not show_members else ""
-                await interaction.followup.send(f"🏛️ **Union Overview (Part {i})**{members_text}", embed=embed, ephemeral=not visible)import discord
+import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from utils.db import get_connection
@@ -21,10 +6,10 @@ from utils.db import get_connection
 class UnionInfo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.auto_cleanup.start()  # Start the automated cleanup task
+        self.auto_cleanup.start()
 
     def cog_unload(self):
-        self.auto_cleanup.cancel()  # Stop the task when cog is unloaded
+        self.auto_cleanup.cancel()
 
     def has_admin_role(self, member):
         """Check if member has admin or mod+ role"""
@@ -35,7 +20,6 @@ class UnionInfo(commands.Cog):
     async def auto_cleanup(self):
         """Automated cleanup task that runs every 12 hours"""
         try:
-            # Find the union-leader channel in all guilds
             target_channel = None
             for guild in self.bot.guilds:
                 for channel in guild.text_channels:
@@ -53,21 +37,18 @@ class UnionInfo(commands.Cog):
             conn = await get_connection()
             
             try:
-                # Get all users from database
                 all_users = await conn.fetch("SELECT discord_id, username, ign_primary, ign_secondary, union_name, union_name_2 FROM users ORDER BY discord_id")
                 
                 if not all_users:
-                    return  # No users to check
+                    return
                 
-                # Track statistics and affected leaders
                 total_users = len(all_users)
                 users_still_in_guild = 0
                 users_left_guild = 0
                 leaders_affected = 0
                 cleanup_actions = []
-                affected_leaders = set()  # Track unique affected leaders
+                affected_leaders = set()
                 
-                # Check each user
                 for user_record in all_users:
                     discord_id = user_record['discord_id']
                     username = user_record['username']
@@ -76,26 +57,19 @@ class UnionInfo(commands.Cog):
                     union_name = user_record['union_name']
                     union_name_2 = user_record['union_name_2']
                     
-                    # Check if user is still in the guild
                     member = guild.get_member(int(discord_id))
                     
                     if member:
-                        # User is still in guild
                         users_still_in_guild += 1
                     else:
-                        # User has left the guild - needs cleanup
                         users_left_guild += 1
                         
-                        # Check if this user was a union leader
                         leader_check = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(discord_id))
                         was_leader = leader_check is not None
                         if leader_check:
                             leaders_affected += 1
-                            
-                            # Remove from leadership
                             await conn.execute("DELETE FROM union_leaders WHERE user_id = $1", int(discord_id))
                             
-                            # Get role names for logging
                             role_names = []
                             if leader_check['role_id']:
                                 role = guild.get_role(leader_check['role_id'])
@@ -106,14 +80,12 @@ class UnionInfo(commands.Cog):
                             
                             cleanup_actions.append(f"👑 **Leader removed:** {username} from {' & '.join(role_names)}")
                         
-                        # Check which unions this user was a member of and find their leaders
                         member_unions = []
                         if union_name:
                             member_unions.append(union_name)
                         if union_name_2:
                             member_unions.append(union_name_2)
                         
-                        # Find leaders of unions this member was part of
                         for union_id in member_unions:
                             try:
                                 union_leaders = await conn.fetch(
@@ -122,24 +94,15 @@ class UnionInfo(commands.Cog):
                                 )
                                 for leader_record in union_leaders:
                                     leader_id = leader_record['user_id']
-                                    # Only add if the leader is still in the guild and not the user who left
                                     if leader_id != int(discord_id):
                                         leader_member = guild.get_member(leader_id)
                                         if leader_member:
                                             affected_leaders.add(leader_id)
                             except:
-                                pass  # Skip invalid union IDs
+                                pass
                         
-                        # Log cleanup to history table before removing user
-                        await conn.execute("""
-                            INSERT INTO cleanup_history (discord_id, username, ign_primary, ign_secondary, union_name, union_name_2, was_leader, cleanup_date, admin_id)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8)
-                        """, discord_id, username, ign_primary, ign_secondary, union_name, union_name_2, was_leader, "AUTO_CLEANUP")
-                        
-                        # Remove user from database entirely
                         await conn.execute("DELETE FROM users WHERE discord_id = $1", discord_id)
                         
-                        # Log the cleanup action
                         ign_display = []
                         if ign_primary:
                             ign_display.append(f"Primary: {ign_primary}")
@@ -164,16 +127,13 @@ class UnionInfo(commands.Cog):
                         
                         cleanup_actions.append(f"👤 **User removed:** {username}{ign_text}{union_text}")
                 
-                # Only post if there were changes
                 if users_left_guild > 0:
-                    # Create summary embed
                     embed = discord.Embed(
                         title="🔄 **AUTOMATED DATABASE CLEANUP**",
                         description="*12-hour automated cleanup completed*",
                         color=0xFFA500
                     )
                     
-                    # Add statistics
                     embed.add_field(
                         name="📊 **STATISTICS**",
                         value=f"**Total users checked:** {total_users}\n"
@@ -183,9 +143,8 @@ class UnionInfo(commands.Cog):
                         inline=False
                     )
                     
-                    # Add cleanup actions (limit to avoid embed size issues)
                     if cleanup_actions:
-                        action_text = "\n".join(cleanup_actions[:10])  # Show first 10 actions
+                        action_text = "\n".join(cleanup_actions[:10])
                         if len(cleanup_actions) > 10:
                             action_text += f"\n... and {len(cleanup_actions) - 10} more actions"
                         
@@ -195,7 +154,6 @@ class UnionInfo(commands.Cog):
                             inline=False
                         )
                     
-                    # Add recommendations
                     if leaders_affected > 0:
                         embed.add_field(
                             name="⚠️ **ATTENTION NEEDED**",
@@ -203,18 +161,16 @@ class UnionInfo(commands.Cog):
                             inline=False
                         )
                     
-                    embed.set_footer(text="Automated cleanup runs every 12 hours • Use /show_cleanup_history for full details")
+                    embed.set_footer(text="Automated cleanup runs every 12 hours")
                     
-                    # Create mention string for affected leaders
                     leader_mentions = []
                     for leader_id in affected_leaders:
                         leader_member = guild.get_member(leader_id)
                         if leader_member:
                             leader_mentions.append(leader_member.mention)
                     
-                    # Send message with leader pings if any
                     if leader_mentions:
-                        ping_message = f"🔔 **Union Leaders:** {' '.join(leader_mentions[:10])}"  # Limit to 10 mentions
+                        ping_message = f"🔔 **Union Leaders:** {' '.join(leader_mentions[:10])}"
                         if len(leader_mentions) > 10:
                             ping_message += f" and {len(leader_mentions) - 10} others"
                         ping_message += "\n*Members from your unions have left Discord - please review the cleanup report below.*"
@@ -251,7 +207,6 @@ class UnionInfo(commands.Cog):
     @app_commands.command(name="show_union_leader", description="Show all union leaders and their assignments")
     @app_commands.describe(visible="Make this message visible to everyone (default: True)")
     async def show_union_leader(self, interaction: discord.Interaction, visible: bool = True):
-        # Defer the response immediately to prevent timeout
         await interaction.response.defer(ephemeral=not visible)
         
         conn = await get_connection()
@@ -289,7 +244,6 @@ class UnionInfo(commands.Cog):
                 except:
                     leader_display = f"**Unknown User**\n🆔 `{leader_id}`"
 
-                # Show leadership for each role they lead
                 leadership_info = []
                 
                 if role_id_primary:
@@ -311,7 +265,6 @@ class UnionInfo(commands.Cog):
                         inline=False
                     )
 
-            # Add summary
             total_leaders = len(rows)
             embed.add_field(
                 name="📊 **SUMMARY**",
@@ -333,17 +286,13 @@ class UnionInfo(commands.Cog):
         visible="Make this message visible to everyone (default: True)"
     )
     async def show_union_detail(self, interaction: discord.Interaction, union_name: str = None, show_members: bool = True, visible: bool = True):
-        # Defer the response immediately to prevent timeout
         await interaction.response.defer(ephemeral=not visible)
         
         conn = await get_connection()
         try:
-            # If union_name is provided, search for specific union (case insensitive)
             if union_name:
-                # Get all registered unions from database
                 all_unions = await conn.fetch("SELECT role_id FROM union_roles ORDER BY role_id")
                 
-                # Find matching union by name (case insensitive) - only from registered unions
                 matching_union = None
                 available_unions = []
                 
@@ -351,13 +300,13 @@ class UnionInfo(commands.Cog):
                     role_id = int(union_row['role_id'])
                     role = interaction.guild.get_role(role_id)
                     if role:
-                        available_unions.append(role.name)  # Track available unions for error message
+                        available_unions.append(role.name)
                         if union_name.lower() in role.name.lower():
                             matching_union = union_row
                             break
                 
                 if not matching_union:
-                    union_list = "\n".join([f"• {name}" for name in available_unions[:10]])  # Show up to 10
+                    union_list = "\n".join([f"• {name}" for name in available_unions[:10]])
                     if len(available_unions) > 10:
                         union_list += f"\n... and {len(available_unions) - 10} more"
                     
@@ -369,7 +318,7 @@ class UnionInfo(commands.Cog):
                     )
                     return
                 
-                unions = [matching_union]  # Only process the matching union
+                unions = [matching_union]
             else:
                 unions = await conn.fetch("SELECT role_id FROM union_roles ORDER BY role_id")
 
@@ -377,21 +326,17 @@ class UnionInfo(commands.Cog):
                 await interaction.followup.send("❌ No unions found.", ephemeral=not visible)
                 return
 
-            # Create embed(s) with member lists
             embeds = []
             
             for union_row in unions:
                 role_id = int(union_row['role_id'])
                 
-                # Get the Discord role
                 role = interaction.guild.get_role(role_id)
                 role_name = role.name if role else f"Unknown Role (ID: {role_id})"
 
-                # Get union leader
                 leader_row = await conn.fetchrow("SELECT user_id FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", role_id)
                 leader_id = leader_row['user_id'] if leader_row else None
 
-                # Get ALL members
                 members = await conn.fetch("""
                     SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2
                     FROM users
@@ -399,24 +344,20 @@ class UnionInfo(commands.Cog):
                     ORDER BY discord_id
                 """, str(role_id))
 
-                # Count total members
                 member_count = len(members)
                 
-                # Check if leader exists but isn't in members table
                 leader_in_members = False
                 if leader_id:
                     leader_in_members = any(str(member['discord_id']) == str(leader_id) for member in members)
                     if not leader_in_members:
                         member_count += 1
 
-                # Create embed for this union
                 embed = discord.Embed(
                     title=f"🏛️ **{role_name}**", 
                     description=f"*Union Members ({member_count}/30)*",
-                    color=0x7B68EE  # Purple color
+                    color=0x7B68EE
                 )
 
-                # Only show members if show_members is True
                 if show_members:
                     if member_count == 0:
                         if leader_id:
@@ -424,7 +365,6 @@ class UnionInfo(commands.Cog):
                                 leader_user = await self.bot.fetch_user(int(leader_id))
                                 discord_name = leader_user.display_name
                                 
-                                # Get leader IGN
                                 leader_igns = await conn.fetchrow(
                                     "SELECT ign_primary, ign_secondary FROM users WHERE discord_id = $1", 
                                     str(leader_id)
@@ -451,7 +391,6 @@ class UnionInfo(commands.Cog):
                         member_entries = []
                         leader_entry = None
                         
-                        # Process members and create sortable list
                         for record in members:
                             discord_id = record['discord_id']
                             ign_primary = record['ign_primary']
@@ -459,7 +398,6 @@ class UnionInfo(commands.Cog):
                             union_name = record['union_name']
                             union_name_2 = record['union_name_2']
 
-                            # Get Discord name
                             try:
                                 member_obj = interaction.guild.get_member(int(discord_id))
                                 if member_obj:
@@ -470,7 +408,6 @@ class UnionInfo(commands.Cog):
                             except:
                                 discord_name = f"Unknown User (ID: {discord_id})"
 
-                            # Determine which IGN to show based on which union slot matches
                             if str(union_name) == str(role_id):
                                 relevant_ign = ign_primary if ign_primary else "*Not registered*"
                             elif str(union_name_2) == str(role_id):
@@ -480,7 +417,6 @@ class UnionInfo(commands.Cog):
 
                             full_display = f"**{discord_name}** ~ IGN: *{relevant_ign}*"
 
-                            # Check if this user is the leader
                             if leader_id and str(discord_id) == str(leader_id):
                                 leader_entry = {
                                     'display': f"👑 {full_display}",
@@ -492,7 +428,6 @@ class UnionInfo(commands.Cog):
                                     'sort_key': relevant_ign.lower() if relevant_ign != "*Not registered*" and relevant_ign != "*Unknown*" else "zzz"
                                 })
                         
-                        # Handle leader not in members table
                         if leader_id and not leader_in_members:
                             try:
                                 leader_user = await self.bot.fetch_user(int(leader_id))
@@ -502,59 +437,47 @@ class UnionInfo(commands.Cog):
                             
                             leader_entry = {
                                 'display': f"👑 **{discord_name}** ~ IGN: *Not in union*",
-                                'sort_key': "zzz"  # Put at end since not in union
+                                'sort_key': "zzz"
                             }
 
-                        # Sort member entries alphabetically by IGN
                         member_entries.sort(key=lambda x: x['sort_key'])
 
-                        # Combine leader + sorted members with character limit per field
                         all_entries = []
                         if leader_entry:
                             all_entries.append(leader_entry['display'])
                         
-                        # Apply 35 line restriction (subtract 1 for leader if present)
                         max_members = 34 if leader_entry else 35
                         all_entries.extend([entry['display'] for entry in member_entries[:max_members]])
                         
-                        # Add truncation notice if needed
                         if len(member_entries) > max_members:
                             remaining = len(member_entries) - max_members
                             all_entries.append(f"\n*... and {remaining} more members (35 line limit)*")
                         
-                        # Try to fit everything in one field first
                         full_member_list = "\n".join(all_entries)
                         
                         if len(full_member_list) <= 1024:
-                            # Fits in one field
                             embed.add_field(name="Members", value=full_member_list, inline=False)
                         else:
-                            # Need to split, but minimize visible gaps
                             current_chunk = []
                             current_length = 0
                             field_count = 0
                             
                             for entry in all_entries:
-                                entry_length = len(entry) + 1  # +1 for newline
+                                entry_length = len(entry) + 1
                                 
-                                # If adding this entry would exceed limit, save current chunk
                                 if current_length + entry_length > 1000 and current_chunk:
                                     field_count += 1
                                     if field_count == 1:
                                         embed.add_field(name="Members", value="\n".join(current_chunk), inline=False)
                                     else:
-                                        # Use minimal spacing for continuation
                                         embed.add_field(name="\u200b", value="\n".join(current_chunk), inline=False)
                                     
-                                    # Start new chunk
                                     current_chunk = [entry]
                                     current_length = entry_length
                                 else:
-                                    # Add to current chunk
                                     current_chunk.append(entry)
                                     current_length += entry_length
                             
-                            # Add remaining entries
                             if current_chunk:
                                 field_count += 1
                                 if field_count == 1:
@@ -562,7 +485,6 @@ class UnionInfo(commands.Cog):
                                 else:
                                     embed.add_field(name="\u200b", value="\n".join(current_chunk), inline=False)
                 else:
-                    # show_members is False - only show summary info
                     if leader_id:
                         try:
                             leader_user = await self.bot.fetch_user(int(leader_id))
@@ -581,22 +503,19 @@ class UnionInfo(commands.Cog):
 
                 embeds.append(embed)
             
-            # Send embeds
             if not embeds:
-                await interaction.followup.send("❌ No union data found.", ephemeral=ephemeral)
+                await interaction.followup.send("❌ No union data found.", ephemeral=not visible)
                 return
             
-            # Send first embed with appropriate message
             if union_name:
-                await interaction.followup.send(f"🔍 **Union Search Result for '{union_name}'**", embed=embeds[0], ephemeral=ephemeral)
+                await interaction.followup.send(f"🔍 **Union Search Result for '{union_name}'**", embed=embeds[0], ephemeral=not visible)
             else:
                 members_text = " (members hidden)" if not show_members else ""
-                await interaction.followup.send(f"🏛️ **Union Overview** ({len(embeds)} unions){members_text}", embed=embeds[0], ephemeral=ephemeral)
+                await interaction.followup.send(f"🏛️ **Union Overview** ({len(embeds)} unions){members_text}", embed=embeds[0], ephemeral=not visible)
             
-            # Send additional embeds if showing all unions
             for i, embed in enumerate(embeds[1:], 2):
                 members_text = " (members hidden)" if not show_members else ""
-                await interaction.followup.send(f"🏛️ **Union Overview (Part {i})**{members_text}", embed=embed, ephemeral=ephemeral)
+                await interaction.followup.send(f"🏛️ **Union Overview (Part {i})**{members_text}", embed=embed, ephemeral=not visible)
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
