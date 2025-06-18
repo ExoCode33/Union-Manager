@@ -27,13 +27,12 @@ class UnionManagement(commands.Cog):
     @app_commands.command(name="register_role_as_union", description="Register a Discord role as a union (Admin only)")
     @app_commands.describe(role="Discord role to register as union", visible="Make this message visible to everyone (default: False)")
     async def register_role_as_union(self, interaction: discord.Interaction, role: discord.Role, visible: bool = False):
-        ephemeral = not visible
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=ephemeral)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=not visible)
             return
 
         if not role.name.startswith("Union-"):
-            await interaction.response.send_message("❌ Role name must start with 'Union-' prefix.", ephemeral=ephemeral)
+            await interaction.response.send_message("❌ Role name must start with 'Union-' prefix.", ephemeral=not visible)
             return
 
         conn = await get_connection()
@@ -41,23 +40,22 @@ class UnionManagement(commands.Cog):
             # Check if already exists first
             existing = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role.id)
             if existing:
-                await interaction.response.send_message(f"❌ Role **{role.name}** is already registered as union", ephemeral=ephemeral)
+                await interaction.response.send_message(f"❌ Role **{role.name}** is already registered as union", ephemeral=not visible)
                 return
             
             # Insert new union role
             await conn.execute("INSERT INTO union_roles (role_id) VALUES ($1)", role.id)
-            await interaction.response.send_message(f"✅ Role **{role.name}** registered as union", ephemeral=ephemeral)
+            await interaction.response.send_message(f"✅ Role **{role.name}** registered as union", ephemeral=not visible)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error registering union role: {str(e)}", ephemeral=ephemeral)
+            await interaction.response.send_message(f"❌ Error registering union role: {str(e)}", ephemeral=not visible)
         finally:
             await conn.close()
 
     @app_commands.command(name="deregister_role_as_union", description="Deregister a union role (Admin only)")
     @app_commands.describe(role="Discord role to deregister", visible="Make this message visible to everyone (default: False)")
     async def deregister_role_as_union(self, interaction: discord.Interaction, role: discord.Role, visible: bool = False):
-        ephemeral = not visible
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=ephemeral)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=not visible)
             return
 
         conn = await get_connection()
@@ -66,18 +64,17 @@ class UnionManagement(commands.Cog):
             await conn.execute("DELETE FROM union_leaders WHERE role_id = $1 OR role_id_2 = $1", role.id)
             await conn.execute("UPDATE users SET union_name = NULL WHERE union_name = $1", str(role.id))
             await conn.execute("UPDATE users SET union_name_2 = NULL WHERE union_name_2 = $1", str(role.id))
-            await interaction.response.send_message(f"✅ Union **{role.name}** deregistered and all members removed", ephemeral=ephemeral)
+            await interaction.response.send_message(f"✅ Union **{role.name}** deregistered and all members removed", ephemeral=not visible)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error deregistering union role: {str(e)}", ephemeral=ephemeral)
+            await interaction.response.send_message(f"❌ Error deregistering union role: {str(e)}", ephemeral=not visible)
         finally:
             await conn.close()
 
     @app_commands.command(name="appoint_union_leader", description="Appoint a union leader by IGN (Admin only)")
     @app_commands.describe(ign="In-game name of the player to appoint as leader", role="Union role", visible="Make this message visible to everyone (default: False)")
     async def appoint_union_leader(self, interaction: discord.Interaction, ign: str, role: discord.Role, visible: bool = False):
-        ephemeral = not visible
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=ephemeral)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=not visible)
             return
 
         # Find Discord user by IGN
@@ -85,7 +82,7 @@ class UnionManagement(commands.Cog):
         if not discord_id:
             await interaction.response.send_message(
                 f"❌ No Discord user found with IGN **{ign}**. They must register their IGN first using `/register_primary_ign` or `/register_secondary_ign`.", 
-                ephemeral=ephemeral
+                ephemeral=not visible
             )
             return
 
@@ -94,7 +91,7 @@ class UnionManagement(commands.Cog):
             # Check if role is registered as union
             role_check = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role.id)
             if not role_check:
-                await interaction.response.send_message(f"❌ Role **{role.name}** is not registered as union", ephemeral=ephemeral)
+                await interaction.response.send_message(f"❌ Role **{role.name}** is not registered as union", ephemeral=not visible)
                 return
 
             # Get the Discord user object for display
@@ -116,7 +113,7 @@ class UnionManagement(commands.Cog):
             if not user_data:
                 await interaction.response.send_message(
                     f"❌ User with IGN **{ign}** not found in database. They must register their IGN first.",
-                    ephemeral=ephemeral
+                    ephemeral=not visible
                 )
                 return
             
@@ -126,7 +123,7 @@ class UnionManagement(commands.Cog):
             if not is_primary_ign and not is_secondary_ign:
                 await interaction.response.send_message(
                     f"❌ IGN **{ign}** is not registered for this Discord user.",
-                    ephemeral=ephemeral
+                    ephemeral=not visible
                 )
                 return
             
@@ -144,7 +141,7 @@ class UnionManagement(commands.Cog):
                     await interaction.response.send_message(
                         f"❌ **{ign}** (Primary IGN) is already leading **{existing_role_name}**. "
                         f"Use `/dismiss_union_leader` first to transfer leadership.",
-                        ephemeral=ephemeral
+                        ephemeral=not visible
                     )
                     return
                 elif is_secondary_ign and current_role_secondary and current_role_secondary != role.id:
@@ -154,14 +151,14 @@ class UnionManagement(commands.Cog):
                     await interaction.response.send_message(
                         f"❌ **{ign}** (Secondary IGN) is already leading **{existing_role_name}**. "
                         f"Use `/dismiss_union_leader` first to transfer leadership.",
-                        ephemeral=ephemeral
+                        ephemeral=not visible
                     )
                     return
                 elif (is_primary_ign and current_role_primary == role.id) or (is_secondary_ign and current_role_secondary == role.id):
                     # Already leading this union with this IGN
                     await interaction.response.send_message(
                         f"❌ **{ign}** is already the leader of **{role.name}**",
-                        ephemeral=ephemeral
+                        ephemeral=not visible
                     )
                     return
                 
@@ -220,19 +217,18 @@ class UnionManagement(commands.Cog):
 
             await interaction.response.send_message(
                 f"✅ **{ign}** ({user_display}) appointed as leader of **{role.name}** and automatically added as a member using {ign_type} IGN{role_status}", 
-                ephemeral=ephemeral
+                ephemeral=not visible
             )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error appointing union leader: {str(e)}", ephemeral=ephemeral)
+            await interaction.response.send_message(f"❌ Error appointing union leader: {str(e)}", ephemeral=not visible)
         finally:
             await conn.close()
 
     @app_commands.command(name="dismiss_union_leader", description="Dismiss a union leader by IGN (Admin only)")
     @app_commands.describe(ign="In-game name of the leader to dismiss", role="Union role to dismiss leader from", visible="Make this message visible to everyone (default: False)")
     async def dismiss_union_leader(self, interaction: discord.Interaction, ign: str, role: discord.Role, visible: bool = False):
-        ephemeral = not visible
         if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=ephemeral)
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=not visible)
             return
 
         # Find Discord user by IGN
@@ -240,7 +236,7 @@ class UnionManagement(commands.Cog):
         if not discord_id:
             await interaction.response.send_message(
                 f"❌ No Discord user found with IGN **{ign}**.", 
-                ephemeral=ephemeral
+                ephemeral=not visible
             )
             return
 
@@ -250,7 +246,7 @@ class UnionManagement(commands.Cog):
             current_leadership = await conn.fetchrow("SELECT role_id, role_id_2 FROM union_leaders WHERE user_id = $1", int(discord_id))
             
             if not current_leadership:
-                await interaction.response.send_message(f"❌ No leadership found for IGN **{ign}**", ephemeral=ephemeral)
+                await interaction.response.send_message(f"❌ No leadership found for IGN **{ign}**", ephemeral=not visible)
                 return
             
             # Determine which IGN slot this IGN belongs to
@@ -260,14 +256,14 @@ class UnionManagement(commands.Cog):
             )
             
             if not user_data:
-                await interaction.response.send_message(f"❌ User data not found for IGN **{ign}**", ephemeral=ephemeral)
+                await interaction.response.send_message(f"❌ User data not found for IGN **{ign}**", ephemeral=not visible)
                 return
             
             is_primary_ign = (user_data['ign_primary'] == ign)
             is_secondary_ign = (user_data['ign_secondary'] == ign)
             
             if not is_primary_ign and not is_secondary_ign:
-                await interaction.response.send_message(f"❌ IGN **{ign}** is not registered for this user", ephemeral=ephemeral)
+                await interaction.response.send_message(f"❌ IGN **{ign}** is not registered for this user", ephemeral=not visible)
                 return
             
             # Check if this IGN is actually leading this role
@@ -275,7 +271,7 @@ class UnionManagement(commands.Cog):
                 if current_leadership['role_id'] != role.id:
                     await interaction.response.send_message(
                         f"❌ **{ign}** (Primary IGN) is not the leader of **{role.name}**", 
-                        ephemeral=ephemeral
+                        ephemeral=not visible
                     )
                     return
                 # Remove primary leadership
@@ -284,10 +280,10 @@ class UnionManagement(commands.Cog):
                 if current_leadership['role_id_2'] != role.id:
                     await interaction.response.send_message(
                         f"❌ **{ign}** (Secondary IGN) is not the leader of **{role.name}**", 
-                        ephemeral=ephemeral
+                        ephemeral=not visible
                     )
                     return
-                # Remove secondary leadership - FIXED: was using $2 instead of $1
+                # Remove secondary leadership
                 await conn.execute("UPDATE union_leaders SET role_id_2 = NULL WHERE user_id = $1", int(discord_id))
             
             # Clean up record if both leadership slots are now NULL
@@ -304,10 +300,10 @@ class UnionManagement(commands.Cog):
             
             await interaction.response.send_message(
                 f"✅ **{ign}** ({user_display}) dismissed as leader of **{role.name}**", 
-                ephemeral=ephemeral
+                ephemeral=not visible
             )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error dismissing union leader: {str(e)}", ephemeral=ephemeral)
+            await interaction.response.send_message(f"❌ Error dismissing union leader: {str(e)}", ephemeral=not visible)
         finally:
             await conn.close()
 
