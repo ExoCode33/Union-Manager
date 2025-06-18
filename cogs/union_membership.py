@@ -106,129 +106,6 @@ class UnionMembership(commands.Cog):
                                 role_changes.append(f"removed **@{old_role_to_remove.name}**")
                         
                         # Assign the new Discord role
-                        await member.add_roles(role, reason=f"Added to union via admin command by {interaction.user}")
-                        role_changes.append(f"assigned **@{role.name}**")
-                        
-                        role_status = f" and {' and '.join(role_changes)} Discord role{'s' if len(role_changes) > 1 else ''}"
-                    else:
-                        role_status = " (Discord roles not changed - user not in server)"
-                except Exception as role_error:
-                    role_status = f" (Discord role management failed: {str(role_error)})"
-                    
-            except:
-                user_display = f"User ID: {user_row['discord_id']}"
-                role_status = " (Discord roles not changed - user not found)"
-
-            await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) added to union **{role.name}** using {ign_type} IGN{transfer_message}{role_status} (Admin override)", 
-                ephemeral=ephemeral
-            )
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error adding user to union: {str(e)}", ephemeral=ephemeral)
-        finally:
-            await conn.close()
-
-    @app_commands.command(name="admin_remove_user_from_union", description="Remove user from specified union by IGN (Admin override)")
-    @app_commands.describe(ign="In-game name to remove", role="Union role to remove them from", visible="Make this message visible to everyone (default: False)")
-    async def admin_remove_user_from_union(self, interaction: discord.Interaction, ign: str, role: discord.Role, visible: bool = False):
-        ephemeral = not visible
-        if not self.has_admin_role(interaction.user):
-            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=ephemeral)
-            return
-
-        conn = await get_connection()
-        try:
-            # Check if role is registered as union
-            role_check = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role.id)
-            if not role_check:
-                await interaction.response.send_message(f"❌ Role **{role.name}** is not registered as union", ephemeral=ephemeral)
-                return
-
-            # Find user by IGN and check if they're in the specified union
-            row = await conn.fetchrow(
-                "SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE ign_primary = $1 OR ign_secondary = $1", 
-                ign
-            )
-            
-            if not row:
-                await interaction.response.send_message(f"❌ No user found with IGN **{ign}**", ephemeral=ephemeral)
-                return
-
-            # Determine which IGN and check if they're in the specified union
-            is_primary_ign = (row['ign_primary'] == ign)
-            current_union = row['union_name'] if is_primary_ign else row['union_name_2']
-            ign_type = "Primary" if is_primary_ign else "Secondary"
-            
-            # Check if they're in the specified union with this IGN
-            if str(current_union) != str(role.id):
-                # Show which union they're actually in (if any)
-                if current_union:
-                    try:
-                        actual_role = interaction.guild.get_role(int(current_union))
-                        actual_union_name = actual_role.name if actual_role else f"Role ID: {current_union}"
-                        await interaction.response.send_message(
-                            f"❌ **{ign}** ({ign_type} IGN) is not in **{role.name}**.\n"
-                            f"They are currently in: **{actual_union_name}**", 
-                            ephemeral=ephemeral
-                        )
-                    except:
-                        await interaction.response.send_message(
-                            f"❌ **{ign}** ({ign_type} IGN) is not in **{role.name}**", 
-                            ephemeral=ephemeral
-                        )
-                else:
-                    await interaction.response.send_message(
-                        f"❌ **{ign}** ({ign_type} IGN) is not in any union", 
-                        ephemeral=ephemeral
-                    )
-                return
-
-            # Remove from the appropriate union slot
-            if is_primary_ign:
-                await conn.execute("UPDATE users SET union_name = NULL WHERE discord_id = $1", row['discord_id'])
-            else:
-                await conn.execute("UPDATE users SET union_name_2 = NULL WHERE discord_id = $1", row['discord_id'])
-
-            # Get Discord user for display and role removal
-            try:
-                discord_user = await self.bot.fetch_user(int(row['discord_id']))
-                user_display = f"{discord_user.mention} ({discord_user.name})"
-                
-                # Try to get the member object to remove the role
-                try:
-                    member = interaction.guild.get_member(int(row['discord_id']))
-                    if member:
-                        # Check if user should still have this role (other IGN might still be in this union)
-                        other_union = row['union_name_2'] if is_primary_ign else row['union_name']
-                        if str(other_union) == str(role.id):
-                            # Their other IGN is still in this union, don't remove role
-                            role_status = " (Discord role kept - other IGN still in union)"
-                        else:
-                            # Remove the Discord role
-                            await member.remove_roles(role, reason=f"Removed from union via admin command by {interaction.user}")
-                            role_status = f" and removed **@{role.name}** Discord role"
-                    else:
-                        role_status = " (Discord role not removed - user not in server)"
-                except Exception as role_error:
-                    role_status = f" (Discord role removal failed: {str(role_error)})"
-                    
-            except:
-                user_display = f"User ID: {row['discord_id']}"
-                role_status = " (Discord role not removed - user not found)"
-
-            await interaction.response.send_message(
-                f"✅ **{ign}** ({user_display}) removed from union **{role.name}** ({ign_type} IGN slot){role_status} (Admin override)", 
-                ephemeral=ephemeral
-            )
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error removing user from union: {str(e)}", ephemeral=ephemeral)
-        finally:
-            await conn.close()
-
-async def setup(bot):
-    await bot.add_cog(UnionMembership(bot))}**")
-                        
-                        # Assign the new Discord role
                         await member.add_roles(led_union_role, reason=f"Added to union via leader command by {interaction.user}")
                         role_changes.append(f"assigned **@{led_union_name}**")
                         
@@ -416,4 +293,127 @@ async def setup(bot):
                             if str(other_union) != str(old_role_to_remove.id):
                                 # Other IGN is not in old union, safe to remove role
                                 await member.remove_roles(old_role_to_remove, reason=f"Transferred from union via admin command by {interaction.user}")
-                                role_changes.append(f"removed **@{old_role_to_remove.name
+                                role_changes.append(f"removed **@{old_role_to_remove.name}**")
+                        
+                        # Assign the new Discord role
+                        await member.add_roles(role, reason=f"Added to union via admin command by {interaction.user}")
+                        role_changes.append(f"assigned **@{role.name}**")
+                        
+                        role_status = f" and {' and '.join(role_changes)} Discord role{'s' if len(role_changes) > 1 else ''}"
+                    else:
+                        role_status = " (Discord roles not changed - user not in server)"
+                except Exception as role_error:
+                    role_status = f" (Discord role management failed: {str(role_error)})"
+                    
+            except:
+                user_display = f"User ID: {user_row['discord_id']}"
+                role_status = " (Discord roles not changed - user not found)"
+
+            await interaction.response.send_message(
+                f"✅ **{ign}** ({user_display}) added to union **{role.name}** using {ign_type} IGN{transfer_message}{role_status} (Admin override)", 
+                ephemeral=ephemeral
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error adding user to union: {str(e)}", ephemeral=ephemeral)
+        finally:
+            await conn.close()
+
+    @app_commands.command(name="admin_remove_user_from_union", description="Remove user from specified union by IGN (Admin override)")
+    @app_commands.describe(ign="In-game name to remove", role="Union role to remove them from", visible="Make this message visible to everyone (default: False)")
+    async def admin_remove_user_from_union(self, interaction: discord.Interaction, ign: str, role: discord.Role, visible: bool = False):
+        ephemeral = not visible
+        if not self.has_admin_role(interaction.user):
+            await interaction.response.send_message("❌ This command requires the @Admin or @Mod+ role.", ephemeral=ephemeral)
+            return
+
+        conn = await get_connection()
+        try:
+            # Check if role is registered as union
+            role_check = await conn.fetchrow("SELECT role_id FROM union_roles WHERE role_id = $1", role.id)
+            if not role_check:
+                await interaction.response.send_message(f"❌ Role **{role.name}** is not registered as union", ephemeral=ephemeral)
+                return
+
+            # Find user by IGN and check if they're in the specified union
+            row = await conn.fetchrow(
+                "SELECT discord_id, ign_primary, ign_secondary, union_name, union_name_2 FROM users WHERE ign_primary = $1 OR ign_secondary = $1", 
+                ign
+            )
+            
+            if not row:
+                await interaction.response.send_message(f"❌ No user found with IGN **{ign}**", ephemeral=ephemeral)
+                return
+
+            # Determine which IGN and check if they're in the specified union
+            is_primary_ign = (row['ign_primary'] == ign)
+            current_union = row['union_name'] if is_primary_ign else row['union_name_2']
+            ign_type = "Primary" if is_primary_ign else "Secondary"
+            
+            # Check if they're in the specified union with this IGN
+            if str(current_union) != str(role.id):
+                # Show which union they're actually in (if any)
+                if current_union:
+                    try:
+                        actual_role = interaction.guild.get_role(int(current_union))
+                        actual_union_name = actual_role.name if actual_role else f"Role ID: {current_union}"
+                        await interaction.response.send_message(
+                            f"❌ **{ign}** ({ign_type} IGN) is not in **{role.name}**.\n"
+                            f"They are currently in: **{actual_union_name}**", 
+                            ephemeral=ephemeral
+                        )
+                    except:
+                        await interaction.response.send_message(
+                            f"❌ **{ign}** ({ign_type} IGN) is not in **{role.name}**", 
+                            ephemeral=ephemeral
+                        )
+                else:
+                    await interaction.response.send_message(
+                        f"❌ **{ign}** ({ign_type} IGN) is not in any union", 
+                        ephemeral=ephemeral
+                    )
+                return
+
+            # Remove from the appropriate union slot
+            if is_primary_ign:
+                await conn.execute("UPDATE users SET union_name = NULL WHERE discord_id = $1", row['discord_id'])
+            else:
+                await conn.execute("UPDATE users SET union_name_2 = NULL WHERE discord_id = $1", row['discord_id'])
+
+            # Get Discord user for display and role removal
+            try:
+                discord_user = await self.bot.fetch_user(int(row['discord_id']))
+                user_display = f"{discord_user.mention} ({discord_user.name})"
+                
+                # Try to get the member object to remove the role
+                try:
+                    member = interaction.guild.get_member(int(row['discord_id']))
+                    if member:
+                        # Check if user should still have this role (other IGN might still be in this union)
+                        other_union = row['union_name_2'] if is_primary_ign else row['union_name']
+                        if str(other_union) == str(role.id):
+                            # Their other IGN is still in this union, don't remove role
+                            role_status = " (Discord role kept - other IGN still in union)"
+                        else:
+                            # Remove the Discord role
+                            await member.remove_roles(role, reason=f"Removed from union via admin command by {interaction.user}")
+                            role_status = f" and removed **@{role.name}** Discord role"
+                    else:
+                        role_status = " (Discord role not removed - user not in server)"
+                except Exception as role_error:
+                    role_status = f" (Discord role removal failed: {str(role_error)})"
+                    
+            except:
+                user_display = f"User ID: {row['discord_id']}"
+                role_status = " (Discord role not removed - user not found)"
+
+            await interaction.response.send_message(
+                f"✅ **{ign}** ({user_display}) removed from union **{role.name}** ({ign_type} IGN slot){role_status} (Admin override)", 
+                ephemeral=ephemeral
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error removing user from union: {str(e)}", ephemeral=ephemeral)
+        finally:
+            await conn.close()
+
+async def setup(bot):
+    await bot.add_cog(UnionMembership(bot))
