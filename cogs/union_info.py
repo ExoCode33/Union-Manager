@@ -1,4 +1,19 @@
-import discord
+# Send embeds
+            if not embeds:
+                await interaction.followup.send("❌ No union data found.", ephemeral=not visible)
+                return
+            
+            # Send first embed with appropriate message
+            if union_name:
+                await interaction.followup.send(f"🔍 **Union Search Result for '{union_name}'**", embed=embeds[0], ephemeral=not visible)
+            else:
+                members_text = " (members hidden)" if not show_members else ""
+                await interaction.followup.send(f"🏛️ **Union Overview** ({len(embeds)} unions){members_text}", embed=embeds[0], ephemeral=not visible)
+            
+            # Send additional embeds if showing all unions
+            for i, embed in enumerate(embeds[1:], 2):
+                members_text = " (members hidden)" if not show_members else ""
+                await interaction.followup.send(f"🏛️ **Union Overview (Part {i})**{members_text}", embed=embed, ephemeral=not visible)import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from utils.db import get_connection
@@ -236,9 +251,8 @@ class UnionInfo(commands.Cog):
     @app_commands.command(name="show_union_leader", description="Show all union leaders and their assignments")
     @app_commands.describe(visible="Make this message visible to everyone (default: True)")
     async def show_union_leader(self, interaction: discord.Interaction, visible: bool = True):
-        ephemeral = not visible
         # Defer the response immediately to prevent timeout
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=not visible)
         
         conn = await get_connection()
         try:
@@ -251,7 +265,7 @@ class UnionInfo(commands.Cog):
             """)
 
             if not rows:
-                await interaction.followup.send("❌ No union leaders found.", ephemeral=ephemeral)
+                await interaction.followup.send("❌ No union leaders found.", ephemeral=not visible)
                 return
 
             embed = discord.Embed(
@@ -305,7 +319,7 @@ class UnionInfo(commands.Cog):
                 inline=False
             )
 
-            await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+            await interaction.followup.send(embed=embed, ephemeral=not visible)
 
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -319,9 +333,8 @@ class UnionInfo(commands.Cog):
         visible="Make this message visible to everyone (default: True)"
     )
     async def show_union_detail(self, interaction: discord.Interaction, union_name: str = None, show_members: bool = True, visible: bool = True):
-        ephemeral = not visible
         # Defer the response immediately to prevent timeout
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=not visible)
         
         conn = await get_connection()
         try:
@@ -352,7 +365,7 @@ class UnionInfo(commands.Cog):
                         f"❌ No registered union found matching **{union_name}**\n\n"
                         f"**Available registered unions:**\n{union_list}\n\n"
                         f"Use `/show_union_detail` without parameters to see all unions.",
-                        ephemeral=ephemeral
+                        ephemeral=not visible
                     )
                     return
                 
@@ -361,7 +374,7 @@ class UnionInfo(commands.Cog):
                 unions = await conn.fetch("SELECT role_id FROM union_roles ORDER BY role_id")
 
             if not unions:
-                await interaction.followup.send("❌ No unions found.", ephemeral=ephemeral)
+                await interaction.followup.send("❌ No unions found.", ephemeral=not visible)
                 return
 
             # Create embed(s) with member lists
