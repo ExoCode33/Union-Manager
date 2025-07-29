@@ -5,8 +5,15 @@ import traceback
 import asyncio
 import logging
 import datetime
+import signal
+import sys
+from concurrent.futures import ThreadPoolExecutor
 
-# Setup comprehensive logging
+# ============================================================
+# ENHANCED LOGGING & PERFORMANCE MONITORING
+# ============================================================
+
+# Setup comprehensive logging with reduced discord.py verbosity
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -15,12 +22,32 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+# Reduce discord.py logging noise
+logging.getLogger('discord').setLevel(logging.WARNING)
+logging.getLogger('discord.http').setLevel(logging.WARNING)
+logging.getLogger('discord.gateway').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
-# Bot configuration
+# ============================================================
+# BOT CONFIGURATION & PERFORMANCE OPTIMIZATIONS
+# ============================================================
+
 TOKEN = os.getenv("DISCORD_TOKEN")
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Create bot with optimized settings
+bot = commands.Bot(
+    command_prefix="!",
+    intents=intents,
+    heartbeat_timeout=60.0,  # Increase heartbeat timeout
+    chunk_guilds_at_startup=False,  # Reduce startup load
+    member_cache_flags=discord.MemberCacheFlags.none()  # Reduce memory usage
+)
+
+# Thread pool for blocking operations
+executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="BotWorker")
 
 # Bot status tracking
 class BotStatus:
@@ -30,124 +57,74 @@ class BotStatus:
         self.last_sync_time = None
         self.modules_loaded = 0
         self.sync_errors = 0
+        self.heartbeat_warnings = 0
 
 bot_status = BotStatus()
 
-async def debug_commands():
-    """Debug function to check if commands are properly registered"""
-    try:
-        print("\n" + "="*60)
-        print("🔍 COMMAND REGISTRATION DEBUG")
-        print("="*60)
-        
-        # Check commands in tree
-        tree_commands = bot.tree.get_commands()
-        print(f"📊 Commands in bot.tree: {len(tree_commands)}")
-        
-        if tree_commands:
-            print("\n🌳 Commands in tree:")
-            for i, cmd in enumerate(tree_commands, 1):
-                print(f"  {i:2d}. {cmd.name}")
-                print(f"      Description: {cmd.description}")
-                print(f"      Parameters: {[param.name for param in cmd.parameters]}")
-                print()
-        else:
-            print("❌ NO COMMANDS FOUND IN TREE!")
-        
-        # Check cogs and their commands
-        print(f"\n🧩 Loaded cogs: {len(bot.cogs)}")
-        total_cog_commands = 0
-        
-        for cog_name, cog in bot.cogs.items():
-            app_commands = cog.get_app_commands()
-            total_cog_commands += len(app_commands)
-            print(f"\n📦 {cog_name}: {len(app_commands)} commands")
-            
-            if app_commands:
-                for j, cmd in enumerate(app_commands, 1):
-                    print(f"    {j}. {cmd.name} - {cmd.description}")
-            else:
-                print("    ❌ No app commands found in this cog")
-        
-        print(f"\n📈 SUMMARY:")
-        print(f"  Total cogs: {len(bot.cogs)}")
-        print(f"  Commands from cogs: {total_cog_commands}")
-        print(f"  Commands in tree: {len(tree_commands)}")
-        print(f"  Discrepancy: {total_cog_commands - len(tree_commands)}")
-        
-        if total_cog_commands != len(tree_commands):
-            print("⚠️ MISMATCH DETECTED: Commands in cogs don't match commands in tree!")
-        else:
-            print("✅ Command counts match between cogs and tree")
-        
-        print("="*60)
-        print()
-        
-    except Exception as e:
-        print(f"❌ Debug error: {e}")
-        print(traceback.format_exc())
+# ============================================================
+# PERFORMANCE UTILITIES
+# ============================================================
 
-async def force_guild_registration():
-    """Force all commands to be registered to each guild"""
-    try:
-        print("\n🔄 FORCING GUILD COMMAND REGISTRATION...")
-        
-        for guild in bot.guilds:
-            print(f"📍 Processing guild: {guild.name}")
-            
-            # Clear existing guild commands
-            bot.tree.clear_commands(guild=guild)
-            
-            # Copy all commands from global tree to guild tree
-            global_commands = bot.tree.get_commands()
-            print(f"  📋 Found {len(global_commands)} commands to copy")
-            
-            for cmd in global_commands:
-                # Copy command to guild-specific tree
-                bot.tree.add_command(cmd, guild=guild)
-                print(f"    ✅ Added {cmd.name} to {guild.name}")
-            
-            # Verify guild commands
-            guild_commands = bot.tree.get_commands(guild=guild)
-            print(f"  📊 Guild now has {len(guild_commands)} commands")
-        
-        print("✅ Guild registration complete!")
-        
-    except Exception as e:
-        print(f"❌ Guild registration error: {e}")
-        print(traceback.format_exc())
+async def safe_blocking_operation(blocking_func, *args, **kwargs):
+    """Run blocking operations in a thread pool to avoid blocking the event loop"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, blocking_func, *args, **kwargs)
+
+def performance_monitor(func_name):
+    """Decorator to monitor function execution time"""
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            start_time = asyncio.get_event_loop().time()
+            try:
+                result = await func(*args, **kwargs)
+                end_time = asyncio.get_event_loop().time()
+                execution_time = end_time - start_time
+                
+                if execution_time > 1.0:  # Log operations taking > 1 second
+                    logger.warning(f"Slow operation '{func_name}' took {execution_time:.2f} seconds")
+                elif execution_time > 5.0:  # Critical threshold
+                    logger.error(f"CRITICAL: '{func_name}' blocked for {execution_time:.2f} seconds")
+                    
+                return result
+            except Exception as e:
+                end_time = asyncio.get_event_loop().time()
+                execution_time = end_time - start_time
+                logger.error(f"Error in '{func_name}' after {execution_time:.2f}s: {e}")
+                raise
+        return wrapper
+    return decorator
+
+# ============================================================
+# BOT EVENT HANDLERS WITH PERFORMANCE MONITORING
+# ============================================================
 
 @bot.event
 async def on_ready():
-    """Clean bot initialization with forced guild registration"""
+    """Optimized bot initialization with heartbeat protection"""
     try:
         # Set startup time
         bot_status.startup_time = datetime.datetime.now(datetime.timezone.utc)
         
         logger.info("============================================================")
-        logger.info("DISCORD UNION BOT INITIALIZATION")
+        logger.info("DISCORD UNION BOT INITIALIZATION (PERFORMANCE OPTIMIZED)")
         logger.info("============================================================")
         logger.info(f"Bot: {bot.user.name}#{bot.user.discriminator} (ID: {bot.user.id})")
         logger.info(f"Connected to {len(bot.guilds)} guilds")
         
-        # Log guild information and permissions
+        # Log guild information efficiently
         for guild in bot.guilds:
             logger.info(f"  - {guild.name} (ID: {guild.id}, Members: {guild.member_count})")
-            
-            # Check bot permissions in each guild
-            bot_member = guild.get_member(bot.user.id)
-            if bot_member:
-                perms = bot_member.guild_permissions
-                logger.info(f"    Permissions: Admin={perms.administrator}, SendMessages={perms.send_messages}")
         
-        # Clear ALL existing commands (global and guild-specific)
-        logger.info("Clearing all existing commands...")
-        bot.tree.clear_commands(guild=None)  # Clear global
+        # Clear existing commands to prevent duplicates
+        logger.info("Clearing existing commands...")
+        bot.tree.clear_commands(guild=None)
         for guild in bot.guilds:
-            bot.tree.clear_commands(guild=guild)  # Clear guild-specific
-        await asyncio.sleep(1)
+            bot.tree.clear_commands(guild=guild)
         
-        # Load all command modules
+        # Short delay to prevent API rate limiting
+        await asyncio.sleep(0.5)
+        
+        # Load command modules with error handling
         logger.info("Loading command modules...")
         modules = [
             "cogs.basic_commands",
@@ -157,19 +134,19 @@ async def on_ready():
         ]
         
         loaded_modules = 0
-        total_commands = 0
         
         for module in modules:
             try:
                 logger.info(f"Loading {module}...")
                 await bot.load_extension(module)
                 loaded_modules += 1
+                # Small delay between module loads to prevent blocking
+                await asyncio.sleep(0.1)
                 
             except Exception as e:
-                logger.error(f"  ❌ Failed to load {module}: {str(e)}")
+                logger.error(f"Failed to load {module}: {str(e)}")
                 logger.error(traceback.format_exc())
         
-        # Update status
         bot_status.modules_loaded = loaded_modules
         total_commands = len(bot.tree.get_commands())
         
@@ -179,95 +156,102 @@ async def on_ready():
         logger.info(f"  Failed: {len(modules) - loaded_modules}")
         logger.info(f"  Total Commands: {total_commands}")
         
-        # DEBUG: Check command registration
-        await debug_commands()
+        if total_commands == 0:
+            logger.error("❌ NO COMMANDS IN TREE - Critical Issue!")
+            return
         
-        # FORCE GUILD REGISTRATION
-        await force_guild_registration()
+        # Critical command verification
+        commands_in_tree = bot.tree.get_commands()
+        critical_commands = ["show_union_leader", "show_union_detail"]
         
-        # Verify command tree
-        commands_in_tree = len(bot.tree.get_commands())
-        logger.info(f"Commands ready: {commands_in_tree}")
+        logger.info("Critical command check:")
+        for critical_cmd in critical_commands:
+            if any(cmd.name == critical_cmd for cmd in commands_in_tree):
+                logger.info(f"  ✅ {critical_cmd} loaded successfully")
+            else:
+                logger.warning(f"  ⚠️ {critical_cmd} missing from tree")
         
-        if commands_in_tree > 0:
-            logger.info("Commands to sync:")
-            for cmd in bot.tree.get_commands():
-                logger.info(f"  - {cmd.name}: {cmd.description}")
-        else:
-            logger.error("❌ NO COMMANDS IN TREE - SYNC WILL FAIL")
-        
-        logger.info("========================================")
-        logger.info("Starting GUILD-ONLY synchronization (no duplicates)...")
-        
-        # GUILD-ONLY sync - no global commands
-        sync_success = False
+        # Optimized guild-specific synchronization
+        logger.info("Starting optimized command synchronization...")
+        sync_success_count = 0
         
         for guild in bot.guilds:
             try:
-                logger.info(f"Syncing commands to guild: {guild.name}")
+                logger.info(f"Syncing to guild: {guild.name}")
                 
-                # DEBUG: Check what we're about to sync
-                pre_sync_commands = bot.tree.get_commands(guild=guild)
-                logger.info(f"Pre-sync: {len(pre_sync_commands)} commands for {guild.name}")
+                # Copy commands to guild tree (no global commands)
+                bot.tree.clear_commands(guild=guild)
+                for cmd in commands_in_tree:
+                    bot.tree.add_command(cmd, guild=guild)
                 
-                # Sync only to this specific guild (not globally)
-                synced = await bot.tree.sync(guild=guild)
+                # Sync with timeout protection
+                synced = await asyncio.wait_for(
+                    bot.tree.sync(guild=guild), 
+                    timeout=30.0
+                )
                 
-                logger.info(f"✅ Guild sync successful: {len(synced)} commands to {guild.name}")
-                
-                if synced:
-                    logger.info(f"Synced commands: {', '.join([cmd.name for cmd in synced])}")
-                    
-                    # Verify critical commands
-                    critical_commands = ["show_union_leader", "show_union_detail"]
-                    for cmd_name in critical_commands:
-                        if any(cmd.name == cmd_name for cmd in synced):
-                            logger.info(f"  ✅ Critical command '{cmd_name}' available in {guild.name}")
-                        else:
-                            logger.warning(f"  ⚠️ Critical command '{cmd_name}' missing in {guild.name}")
-                else:
-                    logger.error(f"❌ No commands were synced to {guild.name}")
-                    logger.error("This usually means:")
-                    logger.error("  1. Commands are not properly registered in the tree")
-                    logger.error("  2. Bot lacks necessary permissions")
-                    logger.error("  3. Discord API rate limiting")
-                
-                # Update status
+                sync_success_count += 1
                 bot_status.commands_synced = len(synced)
                 bot_status.last_sync_time = datetime.datetime.now(datetime.timezone.utc)
-                sync_success = True
                 
+                logger.info(f"✅ Synced {len(synced)} commands to {guild.name}")
+                
+                # Verify critical commands in sync result
+                synced_names = [cmd.name for cmd in synced]
+                for critical_cmd in critical_commands:
+                    if critical_cmd in synced_names:
+                        logger.info(f"  ✅ {critical_cmd} available in {guild.name}")
+                    else:
+                        logger.warning(f"  ⚠️ {critical_cmd} missing in {guild.name}")
+                
+                # Small delay between guild syncs to prevent rate limiting
+                await asyncio.sleep(1.0)
+                
+            except asyncio.TimeoutError:
+                logger.error(f"Sync timeout for guild: {guild.name}")
+                bot_status.sync_errors += 1
             except Exception as e:
-                logger.error(f"❌ Guild sync failed for {guild.name}: {str(e)}")
-                logger.error(traceback.format_exc())
+                logger.error(f"Sync failed for {guild.name}: {str(e)}")
                 bot_status.sync_errors += 1
         
         # Final status report
         logger.info("========================================")
-        if sync_success:
+        if sync_success_count > 0:
             logger.info("🎉 BOT INITIALIZATION COMPLETE")
             logger.info(f"✅ {loaded_modules} modules loaded")
-            logger.info(f"✅ {bot_status.commands_synced} commands synchronized per guild")
-            logger.info(f"✅ Connected to {len(bot.guilds)} guilds")
-            logger.info("✅ NO DUPLICATE COMMANDS - Guild-specific only")
+            logger.info(f"✅ {bot_status.commands_synced} commands per guild")
+            logger.info(f"✅ Synced to {sync_success_count}/{len(bot.guilds)} guilds")
+            logger.info("✅ Heartbeat optimization enabled")
             
-            if bot_status.commands_synced > 0:
-                logger.info("Commands will be available in Discord within 1-2 minutes")
-            else:
-                logger.warning("⚠️ NO COMMANDS SYNCED - Check debug output above")
+            if bot_status.sync_errors > 0:
+                logger.warning(f"⚠️ {bot_status.sync_errors} sync errors occurred")
+            
+            logger.info("Commands will be available in Discord within 1-2 minutes")
         else:
-            logger.warning("⚠️ BOT STARTED WITH SYNC ISSUES")
-            logger.warning("Use !clean_sync to manually sync")
+            logger.error("❌ CRITICAL: No successful synchronizations")
         
         logger.info("============================================================")
+        
+        # Start background tasks
+        asyncio.create_task(heartbeat_monitor())
         
     except Exception as e:
         logger.error(f"Critical error during bot initialization: {str(e)}")
         logger.error(traceback.format_exc())
 
 @bot.event
+async def on_disconnect():
+    """Enhanced disconnect handling"""
+    logger.warning("Bot disconnected from Discord")
+
+@bot.event
+async def on_resumed():
+    """Enhanced resume handling"""
+    logger.info("Bot resumed connection to Discord")
+
+@bot.event
 async def on_command_error(ctx, error):
-    """Enhanced error handling with detailed logging"""
+    """Enhanced error handling with performance logging"""
     if isinstance(error, commands.CommandNotFound):
         return  # Ignore unknown commands
     
@@ -278,100 +262,128 @@ async def on_command_error(ctx, error):
         await ctx.send("❌ I don't have the required permissions to execute this command.")
     
     else:
-        # Log unexpected errors
+        # Log unexpected errors with context
         logger.error(f"Command error in {ctx.command}: {str(error)}")
+        logger.error(f"User: {ctx.author} | Channel: {ctx.channel} | Guild: {ctx.guild}")
         logger.error(traceback.format_exc())
         await ctx.send(f"❌ An unexpected error occurred: {str(error)}")
 
-# ============================================================
-# CLEAN SYNC COMMANDS (NO DUPLICATES)
-# ============================================================
-
-@bot.command(name='debug_sync')
-async def debug_sync(ctx):
-    """Debug sync command to check what's happening"""
-    if not any(role.name.lower() in ["admin", "administrator"] for role in ctx.author.roles):
-        await ctx.send("❌ This command requires administrator permissions.")
-        return
-    
-    try:
-        await ctx.send("🔍 **STARTING DEBUG SYNC...**")
-        
-        # Run debug function
-        await debug_commands()
-        
-        guild = ctx.guild
-        
-        # Check current state
-        tree_commands = len(bot.tree.get_commands())
-        guild_commands = len(bot.tree.get_commands(guild=guild))
-        
-        debug_msg = f"""📊 **DEBUG INFORMATION:**
-
-**Tree Commands:** {tree_commands}
-**Guild Commands:** {guild_commands}
-**Loaded Cogs:** {len(bot.cogs)}
-
-**Cogs:** {', '.join(bot.cogs.keys())}
-
-**Tree Commands List:**
-{chr(10).join([f'• {cmd.name}' for cmd in bot.tree.get_commands()]) if bot.tree.get_commands() else 'None'}"""
-
-        await ctx.send(debug_msg)
-        
-        # Force guild registration before sync
-        await ctx.send("🔄 **Forcing guild registration...**")
-        await force_guild_registration()
-        
-        # Check guild commands after registration
-        guild_commands_after = len(bot.tree.get_commands(guild=guild))
-        await ctx.send(f"📊 **Guild commands after registration:** {guild_commands_after}")
-        
-        # Try to sync
-        await ctx.send("🔄 **Attempting sync...**")
-        synced = await bot.tree.sync(guild=guild)
-        
-        await ctx.send(f"✅ **Sync result:** {len(synced)} commands synced")
-        
-        if synced:
-            sync_list = '\n'.join([f'• {cmd.name}' for cmd in synced])
-            await ctx.send(f"**Synced commands:**\n{sync_list}")
-        
-    except Exception as e:
-        await ctx.send(f"❌ Debug sync failed: {str(e)}")
-        logger.error(f"Debug sync error: {str(e)}")
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    """Global error handler for slash commands with performance monitoring"""
+    if isinstance(error, discord.app_commands.CommandNotFound):
+        logger.error(f"Command not found: {error}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "❌ Command not found. This may indicate a synchronization issue. "
+                "Please contact an administrator.", 
+                ephemeral=True
+            )
+    elif isinstance(error, discord.app_commands.CommandOnCooldown):
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                f"❌ Command on cooldown. Try again in {error.retry_after:.1f} seconds.", 
+                ephemeral=True
+            )
+    else:
+        logger.error(f"App command error: {error}")
+        logger.error(f"Command: {interaction.command} | User: {interaction.user} | Guild: {interaction.guild}")
         logger.error(traceback.format_exc())
+        
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "❌ An unexpected error occurred. The issue has been logged.", 
+                ephemeral=True
+            )
+
+# ============================================================
+# BACKGROUND TASKS & MONITORING
+# ============================================================
+
+async def heartbeat_monitor():
+    """Background task to monitor bot health and performance"""
+    await bot.wait_until_ready()
+    logger.info("🔄 Heartbeat monitor started")
+    
+    last_heartbeat_warning = 0
+    
+    while not bot.is_closed():
+        try:
+            # Check heartbeat latency
+            latency = bot.latency * 1000  # Convert to milliseconds
+            
+            if latency > 1000:  # More than 1 second
+                bot_status.heartbeat_warnings += 1
+                current_time = asyncio.get_event_loop().time()
+                
+                # Rate limit heartbeat warnings (max 1 per minute)
+                if current_time - last_heartbeat_warning > 60:
+                    logger.warning(f"High latency detected: {latency:.1f}ms")
+                    last_heartbeat_warning = current_time
+            
+            # Memory cleanup every hour
+            if bot_status.startup_time:
+                uptime = datetime.datetime.now(datetime.timezone.utc) - bot_status.startup_time
+                if uptime.total_seconds() % 3600 < 30:  # Every hour (with 30s window)
+                    logger.debug("Performing periodic cleanup")
+                    # Force garbage collection
+                    import gc
+                    gc.collect()
+            
+            await asyncio.sleep(30)  # Check every 30 seconds
+            
+        except Exception as e:
+            logger.error(f"Heartbeat monitor error: {e}")
+            await asyncio.sleep(60)  # Wait longer on error
+
+# ============================================================
+# OPTIMIZED SYNC COMMANDS
+# ============================================================
 
 @bot.command(name='force_sync')
+@performance_monitor('force_sync')
 async def force_sync(ctx):
-    """Force guild registration and sync (Admin only)"""
+    """Force guild registration and sync (Admin only) - Optimized"""
     if not any(role.name.lower() in ["admin", "administrator"] for role in ctx.author.roles):
         await ctx.send("❌ This command requires administrator permissions.")
         return
     
     try:
-        await ctx.send("🔄 **FORCE SYNC STARTING...**")
+        await ctx.send("🔄 **OPTIMIZED FORCE SYNC STARTING...**")
         
         guild = ctx.guild
         
-        # Step 1: Force guild registration
-        await ctx.send("📍 **Step 1: Forcing guild registration...**")
-        await force_guild_registration()
+        # Step 1: Clear and rebuild command tree
+        await ctx.send("📍 **Step 1: Rebuilding command tree...**")
+        bot.tree.clear_commands(guild=guild)
         
-        # Step 2: Check guild commands
+        # Get global commands and copy to guild
+        global_commands = bot.tree.get_commands()
+        for cmd in global_commands:
+            bot.tree.add_command(cmd, guild=guild)
+        
         guild_commands = len(bot.tree.get_commands(guild=guild))
-        await ctx.send(f"📊 **Guild commands registered:** {guild_commands}")
+        await ctx.send(f"📊 **Commands ready:** {guild_commands}")
         
-        # Step 3: Sync
+        # Step 2: Sync with timeout protection
         await ctx.send("📍 **Step 2: Syncing to Discord...**")
-        synced = await bot.tree.sync(guild=guild)
         
-        success_msg = f"""✅ **FORCE SYNC COMPLETE!**
+        try:
+            synced = await asyncio.wait_for(
+                bot.tree.sync(guild=guild), 
+                timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            await ctx.send("❌ **Sync timeout.** Discord may be experiencing delays. Try again in a few minutes.")
+            return
+        
+        success_msg = f"""✅ **OPTIMIZED SYNC COMPLETE!**
 
 🎯 **Guild:** {guild.name}
 ✅ **Commands Synced:** {len(synced)}
+🚀 **Performance:** Optimized for reduced blocking
 
-**Commands available:**
+**Available commands:**
 {', '.join([f'`/{cmd.name}`' for cmd in synced[:10]])}
 {'...' if len(synced) > 10 else ''}
 
@@ -379,11 +391,11 @@ async def force_sync(ctx):
         
         await ctx.send(success_msg)
         
-        logger.info(f"✅ Force sync successful: {len(synced)} commands to {guild.name}")
-        
         # Update status
         bot_status.commands_synced = len(synced)
         bot_status.last_sync_time = datetime.datetime.now(datetime.timezone.utc)
+        
+        logger.info(f"✅ Force sync successful: {len(synced)} commands to {guild.name}")
         
     except Exception as e:
         error_msg = f"❌ **Force sync failed:** {str(e)}"
@@ -391,97 +403,101 @@ async def force_sync(ctx):
         logger.error(f"Force sync error: {str(e)}")
         logger.error(traceback.format_exc())
 
-# ... (rest of the commands from previous version)
-
-@bot.command(name='clean_sync')
-async def clean_sync(ctx):
-    """Clean sync - Guild-specific commands only, no duplicates (Admin only)"""
-    if not any(role.name.lower() in ["admin", "administrator"] for role in ctx.author.roles):
-        await ctx.send("❌ This command requires administrator permissions.")
-        return
-    
+@bot.command(name='bot_health')
+async def bot_health(ctx):
+    """Display bot health and performance statistics"""
     try:
-        await ctx.send("🧹 **CLEAN SYNC STARTING...**\n*Removing duplicates and syncing guild-specific only*")
+        uptime = datetime.datetime.now(datetime.timezone.utc) - bot_status.startup_time if bot_status.startup_time else datetime.timedelta(0)
+        latency = round(bot.latency * 1000, 1)
         
-        guild = ctx.guild
+        # Health status
+        health_color = discord.Color.green()
+        health_status = "🟢 Healthy"
         
-        # Step 1: Clear global commands completely
-        logger.info("Clearing global commands...")
-        bot.tree.clear_commands(guild=None)
-        await bot.tree.sync()  # Empty global sync
+        if latency > 1000:
+            health_color = discord.Color.orange()
+            health_status = "🟡 High Latency"
         
-        # Step 2: Clear guild commands
-        logger.info(f"Clearing guild commands for {guild.name}...")
-        bot.tree.clear_commands(guild=guild)
+        if bot_status.heartbeat_warnings > 10:
+            health_color = discord.Color.red()
+            health_status = "🔴 Performance Issues"
         
-        # Step 3: Force guild registration
-        await force_guild_registration()
+        embed = discord.Embed(
+            title="🤖 Bot Health Status",
+            description=health_status,
+            color=health_color
+        )
         
-        # Step 4: Sync only to this guild
-        logger.info(f"Syncing to guild only: {guild.name}")
-        synced = await bot.tree.sync(guild=guild)
+        embed.add_field(name="📊 Performance", value=f"Latency: {latency}ms\nUptime: {str(uptime).split('.')[0]}", inline=True)
+        embed.add_field(name="⚙️ Commands", value=f"Synced: {bot_status.commands_synced}\nModules: {bot_status.modules_loaded}", inline=True)
+        embed.add_field(name="⚠️ Warnings", value=f"Heartbeat: {bot_status.heartbeat_warnings}\nSync Errors: {bot_status.sync_errors}", inline=True)
+        embed.add_field(name="🏠 Guilds", value=str(len(bot.guilds)), inline=True)
+        embed.add_field(name="📈 Memory", value=f"Threads: {executor._threads if hasattr(executor, '_threads') else 'N/A'}", inline=True)
+        embed.add_field(name="🔄 Last Sync", value=f"{bot_status.last_sync_time.strftime('%H:%M:%S UTC') if bot_status.last_sync_time else 'Never'}", inline=True)
         
-        success_msg = f"""✅ **CLEAN SYNC COMPLETE!**
-
-🧹 **No Duplicates:** Guild-specific commands only
-✅ **Guild:** {guild.name}
-✅ **Commands Available:** {len(synced)}
-
-**Commands synced:**
-{', '.join([f'`/{cmd.name}`' for cmd in synced[:10]])}
-{'...' if len(synced) > 10 else ''}
-
-⏰ **Commands will appear in 1-2 minutes**
-🎯 **No duplicate commands!**"""
-        
-        await ctx.send(success_msg)
-        
-        logger.info(f"✅ Clean sync successful: {len(synced)} commands to {guild.name}")
-        logger.info(f"Synced commands: {[cmd.name for cmd in synced]}")
-        
-        # Update status
-        bot_status.commands_synced = len(synced)
-        bot_status.last_sync_time = datetime.datetime.now(datetime.timezone.utc)
+        await ctx.send(embed=embed)
         
     except Exception as e:
-        error_msg = f"❌ **Clean sync failed:** {str(e)}"
-        await ctx.send(error_msg)
-        logger.error(f"Clean sync error: {str(e)}")
-        logger.error(traceback.format_exc())
+        await ctx.send(f"❌ Health check failed: {str(e)}")
 
 # ============================================================
-# BASIC SLASH COMMANDS
+# BASIC SLASH COMMANDS (Performance Optimized)
 # ============================================================
 
-@bot.tree.command(name="ping", description="Test bot responsiveness")
+@bot.tree.command(name="ping", description="Test bot responsiveness and performance")
 async def ping(interaction: discord.Interaction):
-    """Basic ping command for testing"""
+    """Optimized ping command with performance metrics"""
     try:
-        latency = round(bot.latency * 1000)
-        await interaction.response.send_message(f"🏓 **Pong!** Latency: {latency}ms")
+        # Measure response time
+        start_time = asyncio.get_event_loop().time()
+        
+        latency = round(bot.latency * 1000, 1)
+        
+        # Calculate command processing time
+        processing_time = round((asyncio.get_event_loop().time() - start_time) * 1000, 1)
+        
+        # Health indicator
+        if latency < 100:
+            status = "🟢 Excellent"
+        elif latency < 300:
+            status = "🟡 Good"
+        elif latency < 1000:
+            status = "🟠 Fair"
+        else:
+            status = "🔴 Poor"
+        
+        await interaction.response.send_message(
+            f"🏓 **Pong!**\n"
+            f"**WebSocket:** {latency}ms\n"
+            f"**Processing:** {processing_time}ms\n"
+            f"**Status:** {status}"
+        )
+        
     except Exception as e:
         await interaction.response.send_message(f"❌ Ping failed: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="bot_info", description="Display bot information")
+@bot.tree.command(name="bot_info", description="Display optimized bot information")
 async def bot_info(interaction: discord.Interaction):
-    """Display bot information"""
+    """Display comprehensive bot information"""
     try:
         guild = interaction.guild
-        global_commands = len(bot.tree.get_commands())
-        guild_commands = len(bot.tree.get_commands(guild=guild))
+        uptime = datetime.datetime.now(datetime.timezone.utc) - bot_status.startup_time if bot_status.startup_time else datetime.timedelta(0)
         
         embed = discord.Embed(
             title="🤖 Union Bot Information",
-            description="Discord Union Management Bot - Clean Version",
+            description="Discord Union Management Bot - Performance Optimized",
             color=discord.Color.blue()
         )
         
         embed.add_field(name="👤 Bot", value=f"{bot.user.name}#{bot.user.discriminator}", inline=True)
         embed.add_field(name="🆔 ID", value=str(bot.user.id), inline=True)
+        embed.add_field(name="⏱️ Uptime", value=str(uptime).split('.')[0], inline=True)
         embed.add_field(name="🏠 Guilds", value=str(len(bot.guilds)), inline=True)
-        embed.add_field(name="⚙️ Global Commands", value=str(global_commands), inline=True)
-        embed.add_field(name="🎯 Guild Commands", value=str(guild_commands), inline=True)
-        embed.add_field(name="🧹 Status", value="✅ No Duplicates" if global_commands == 0 else "⚠️ Check duplicates", inline=True)
+        embed.add_field(name="⚙️ Commands", value=str(bot_status.commands_synced), inline=True)
+        embed.add_field(name="🧩 Modules", value=str(bot_status.modules_loaded), inline=True)
+        embed.add_field(name="🔄 Performance", value="✅ Optimized" if bot_status.heartbeat_warnings < 5 else "⚠️ Degraded", inline=True)
+        embed.add_field(name="📊 Latency", value=f"{round(bot.latency * 1000, 1)}ms", inline=True)
+        embed.add_field(name="🎯 Status", value="🟢 Operational", inline=True)
         
         await interaction.response.send_message(embed=embed)
         
@@ -489,54 +505,86 @@ async def bot_info(interaction: discord.Interaction):
         await interaction.response.send_message(f"❌ Info display failed: {str(e)}", ephemeral=True)
 
 # ============================================================
-# PREFIX COMMANDS FOR TESTING
+# GRACEFUL SHUTDOWN HANDLING
 # ============================================================
 
-@bot.command(name='ping')
-async def ping_prefix(ctx):
-    """Prefix version of ping for testing"""
-    latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 **Pong!** Latency: {latency}ms")
-
-@bot.command(name='help_clean')
-async def help_clean(ctx):
-    """Show clean sync commands"""
-    help_msg = """🧹 **SYNC COMMANDS:**
-
-**!force_sync** - Force guild registration and sync
-**!debug_sync** - Debug command registration and sync issues
-**!clean_sync** - Remove duplicates and sync guild-specific only
-
-🎯 **Goal:** All commands working in Discord"""
+def signal_handler(sig, frame):
+    """Handle shutdown signals gracefully"""
+    logger.info('Shutting down bot gracefully...')
     
-    await ctx.send(help_msg)
+    # Close thread pool
+    executor.shutdown(wait=False)
+    
+    # Close bot connection
+    asyncio.create_task(bot.close())
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 # ============================================================
-# BOT STARTUP
+# MAIN STARTUP FUNCTION
 # ============================================================
 
+@performance_monitor('main_startup')
 async def main():
-    """Main bot startup function with enhanced error handling"""
+    """Optimized main bot startup function"""
     try:
         if not TOKEN:
             logger.error("❌ DISCORD_TOKEN environment variable not found!")
             logger.error("Please set your bot token in the .env file")
             return
         
-        logger.info("Starting Discord Union Bot (Clean Version - No Duplicates)...")
-        await bot.start(TOKEN)
+        logger.info("Starting Discord Union Bot (Performance Optimized)...")
+        logger.info("Optimizations: Heartbeat monitoring, thread pooling, reduced blocking")
+        
+        # Initialize bot with connection retry logic
+        max_retries = 3
+        retry_delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                await bot.start(TOKEN)
+                break
+            except discord.ConnectionClosed:
+                logger.warning(f"Connection closed, attempt {attempt + 1}/{max_retries}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    raise
+            except discord.HTTPException as e:
+                logger.error(f"HTTP Exception on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                else:
+                    raise
         
     except discord.LoginFailure:
         logger.error("❌ Invalid Discord token!")
     except Exception as e:
         logger.error(f"❌ Failed to start bot: {str(e)}")
         logger.error(traceback.format_exc())
+    finally:
+        # Cleanup thread pool
+        executor.shutdown(wait=True)
+
+# ============================================================
+# STARTUP EXECUTION
+# ============================================================
 
 if __name__ == "__main__":
     try:
+        # Set up asyncio policies for better performance on Windows
+        if sys.platform == 'win32':
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        
         asyncio.run(main())
+        
     except KeyboardInterrupt:
         logger.info("Bot shutdown requested by user")
     except Exception as e:
         logger.error(f"Critical startup error: {str(e)}")
         logger.error(traceback.format_exc())
+    finally:
+        logger.info("Bot shutdown complete")
